@@ -1,8 +1,8 @@
-# AutoModpack + Fabric installer
-This is a forked version of the fabric installer that has been modified to support the automatic download of the automodpack mod to make it even simplier to play with friends that don't want to mess with downloading mods and such.
+# AutoModpack + NeoForge installer
+This is a NeoForge installer based on the bundled NeoForge Legacy Installer source. After a successful client or server installation it also downloads the matching AutoModpack mod from Modrinth.
 
-Use it as a normal fabric installer for the official minecraft launcher, minecraft server.
+Use it as a normal NeoForge installer for the official Minecraft launcher or a Minecraft server.
 
 It supports all versions that [AutoModpack mod](https://modrinth.com/mod/automodpack) supports.
 
-Based on https://github.com/FabricMC/fabric-installer
+Based on the NeoForge Legacy Installer.
