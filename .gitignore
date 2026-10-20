@@ -18,3 +18,4 @@
 !/settings.gradle
 !/checkstyle.xml
 !/.editorconfig
+!/proguard.pro
