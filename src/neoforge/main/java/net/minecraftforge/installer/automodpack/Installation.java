@@ -1,7 +1,5 @@
 package net.minecraftforge.installer.automodpack;
 
-import net.minecraftforge.installer.actions.ProgressCallback;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -13,11 +11,11 @@ public final class Installation {
     private Installation() {
     }
 
-    public static void installAutomodpack(String gameVersion, Path minecraftDirectory, ProgressCallback monitor) {
+    public static void installAutomodpack(String gameVersion, Path minecraftDirectory) {
         try {
             String downloadUrl = ModrinthApi.getLatestDownloadUrl(gameVersion);
             if (downloadUrl == null) {
-                monitor.message("AutoModpack is not available for Minecraft " + gameVersion);
+                System.out.println("AutoModpack is not available for Minecraft " + gameVersion);
                 return;
             }
 
@@ -25,12 +23,16 @@ public final class Installation {
             Files.createDirectories(modsDirectory);
             String path = new URL(downloadUrl).getPath();
             String fileName = path.substring(path.lastIndexOf('/') + 1);
-            monitor.stage("Downloading AutoModpack " + fileName, true);
+            System.out.println("Downloading AutoModpack " + fileName);
             try (InputStream input = new URL(downloadUrl).openStream()) {
                 Files.copy(input, modsDirectory.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
-            monitor.message("Failed to download AutoModpack: " + e.getMessage());
+            System.out.println("Failed to download AutoModpack: " + e.getMessage());
         }
+    }
+
+    public static void installAutomodpack(String gameVersion, Path minecraftDirectory, Object monitor) {
+        installAutomodpack(gameVersion, minecraftDirectory);
     }
 }
