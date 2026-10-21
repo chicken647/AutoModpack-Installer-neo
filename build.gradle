@@ -51,6 +51,9 @@ sourceSets {
             setSrcDirs([
                     file('src/neoforge/main/java')
             ])
+            include 'net/minecraftforge/installer/WrapperInstaller.java'
+            include 'net/minecraftforge/installer/OfficialInstallerLauncher.java'
+            include 'net/minecraftforge/installer/NeoForgeVersionApi.java'
         }
         resources {
             setSrcDirs([
@@ -63,6 +66,8 @@ sourceSets {
             setSrcDirs([
                     file('src/neoforge/test/java')
             ])
+            include 'net/minecraftforge/installer/NeoForgeVersionApiTest.java'
+            include 'net/minecraftforge/installer/OfficialInstallerLauncherTest.java'
         }
     }
 }
@@ -78,7 +83,7 @@ println('Installer Version: ' + version)
 
 ext {
     SPEC_VERSION = version
-    MAIN_CLASS = 'net.minecraftforge.installer.SimpleInstaller'
+    MAIN_CLASS = 'net.minecraftforge.installer.WrapperInstaller'
     MANIFEST = manifest{
         attributes('Main-Class': MAIN_CLASS)
         attributes([
@@ -92,22 +97,9 @@ ext {
     }
 }
 
-configurations {
-    testInstallerData {
-        canBeConsumed = false
-        canBeResolved = true
-        transitive = false
-    }
-}
-
 dependencies {
-    implementation 'net.sf.jopt-simple:jopt-simple:5.0.4'
-    implementation 'com.google.code.gson:gson:2.11.0'
-    implementation 'net.neoforged.installertools:cli-utils:2.1.0'
 	testImplementation(platform('org.junit:junit-bom:5.7.2'))
 	testImplementation('org.junit.jupiter:junit-jupiter')
-    compileOnly 'org.jetbrains:annotations:24.1.0'
-    testInstallerData 'net.neoforged:neoforge:26.1.2.76:installer'
 }
 
 test {
@@ -126,13 +118,11 @@ java {
 }
 
 shadowJar {
-    dependsOn project.configurations.testInstallerData
     archiveClassifier = 'fatjar'
-    from(zipTree(project.configurations.testInstallerData.singleFile)) {
-        exclude '**/*.class'
-    }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    manifest.from(MANIFEST)
+    manifest {
+        attributes('Main-Class': 'net.minecraftforge.installer.WrapperInstaller')
+    }
 }
 
 tasks.register('verifyFatJarContents') {
@@ -140,7 +130,8 @@ tasks.register('verifyFatJarContents') {
     doLast {
         def fatJar = new java.util.jar.JarFile(shadowJar.archiveFile.get().asFile)
         try {
-            assert fatJar.getEntry('install_profile.json') != null
+            assert fatJar.getEntry('net/minecraftforge/installer/WrapperInstaller.class') != null
+            assert fatJar.getEntry('install_profile.json') == null
         } finally {
             fatJar.close()
         }
@@ -204,28 +195,6 @@ tasks.register('testJar', Jar) {
     from sourceSets.test.output
     archiveClassifier = 'test'
     manifest.from(MANIFEST)
-}
-
-// Combine the shrunk jar with data from the current Neoforge installer
-tasks.register('productionTestJar', Jar) {
-    group = "build"
-    dependsOn shrinkJar
-    from zipTree(shrinkJar.archiveFile.get().asFile)
-    from(zipTree(configurations.testInstallerData.singleFile)) {
-        exclude '/**/*.class'
-    }
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    archiveClassifier = 'prodtest'
-    manifest.from(MANIFEST)
-}
-
-/**
- * Run this installer that contains the data from a real Neoforge installer.
- */
-tasks.register('runProductionTest', JavaExec) {
-    dependsOn tasks.named("productionTestJar")
-    mainClass = "-jar";
-    args productionTestJar.archiveFile.get()
 }
 
 publishing {
