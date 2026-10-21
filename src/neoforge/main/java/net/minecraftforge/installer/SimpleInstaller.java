@@ -13,6 +13,15 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
+/*
+ * This file is retained only for source compatibility with the inactive
+ * embedded-installer sources. The project now builds WrapperInstaller, which
+ * downloads and delegates to the official NeoForge installer.
+ *
+ * The former implementation depended on jopt-simple and cliutils, but is no
+ * longer part of the project and must not be indexed as active installer code.
+ */
+/*
 package net.minecraftforge.installer;
 
 import java.awt.GraphicsEnvironment;
@@ -403,5 +412,24 @@ public class SimpleInstaller {
         })));
 
         System.setProperty(ProgressReporter.ENABLED_PROPERTY, "true");
+    }
+}
+*/
+
+package net.minecraftforge.installer;
+
+import java.net.URL;
+
+/**
+ * Compatibility state for source files from the inactive embedded installer.
+ */
+@Deprecated
+public final class SimpleInstaller {
+    public static boolean headless;
+    public static boolean debug;
+    public static URL mirror;
+    public static boolean skipHashCheck;
+
+    private SimpleInstaller() {
     }
 }
