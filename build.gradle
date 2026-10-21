@@ -49,13 +49,11 @@ sourceSets {
     main {
         java {
             setSrcDirs([
-                    file('NeoForge-LegacyInstaller-main/src/main/java'),
                     file('src/neoforge/main/java')
             ])
         }
         resources {
             setSrcDirs([
-                    file('NeoForge-LegacyInstaller-main/src/main/resources'),
                     file('src/neoforge/main/resources')
             ])
         }
@@ -63,7 +61,6 @@ sourceSets {
     test {
         java {
             setSrcDirs([
-                    file('NeoForge-LegacyInstaller-main/src/test/java'),
                     file('src/neoforge/test/java')
             ])
         }
@@ -71,7 +68,7 @@ sourceSets {
 }
 
 license {
-  header project.file('NeoForge-LegacyInstaller-main/LICENSE-header.txt')
+  header project.file('LICENSE-header.txt')
   include 'net/minecraftforge/installer/**/*.java'
   newLine false
 }
