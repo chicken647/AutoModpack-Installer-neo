@@ -3,4 +3,4 @@ This is a NeoForge installer based on the bundled NeoForge Legacy Installer sour
 
 It supports all versions that [AutoModpack mod](https://modrinth.com/mod/automodpack) supports.
 
-Based on the NeoForge Legacy Installer.
+Based on https://github.com/Skidamek/AutoModpack-Installer
