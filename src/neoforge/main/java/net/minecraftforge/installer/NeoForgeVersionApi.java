@@ -8,10 +8,12 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Pattern;
 
 final class NeoForgeVersionApi {
     private static final String METADATA_URL = "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
     private static final String INSTALLER_URL = "https://maven.neoforged.net/releases/net/neoforged/neoforge/%s/neoforge-%s-installer.jar";
+    private static final Pattern VERSION_PATTERN = Pattern.compile("\\d+(?:\\.\\d+)+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?");
 
     private NeoForgeVersionApi() {
     }
@@ -50,6 +52,9 @@ final class NeoForgeVersionApi {
     }
 
     static String installerUrl(String version) {
+        if (version == null || !VERSION_PATTERN.matcher(version).matches()) {
+            throw new IllegalArgumentException("Invalid NeoForge version");
+        }
         return String.format(INSTALLER_URL, version, version);
     }
 

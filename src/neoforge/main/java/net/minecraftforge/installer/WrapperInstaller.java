@@ -4,6 +4,7 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.Insets;
 import java.io.File;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -38,14 +39,17 @@ public final class WrapperInstaller {
     }
 
     private static void runCommandLine(String[] args) {
-        if (args.length < 3 || !(args[0].equals("--installClient") || args[0].equals("--installServer") || args[0].equals("--fat-installer"))) {
+        if (args.length < 3) {
             System.err.println("Usage: java -jar installer.jar <version> <action> <directory>");
             System.err.println("Actions: --installClient, --installServer, --fat-installer");
             return;
         }
         try {
-            File installer = OfficialInstallerLauncher.download(args[1]);
-            int exitCode = OfficialInstallerLauncher.run(installer, args[0], args[1], new File(args[2]));
+            String action = validateAction(args[0]);
+            String version = validateVersion(args[1]);
+            File target = validateTarget(args[2]);
+            File installer = OfficialInstallerLauncher.download(version);
+            int exitCode = OfficialInstallerLauncher.run(installer, action, target);
             if (exitCode != 0) {
                 System.exit(exitCode);
             }
@@ -53,6 +57,25 @@ public final class WrapperInstaller {
             LOGGER.log(Level.SEVERE, "Command-line installation failed", exception);
             System.exit(1);
         }
+    }
+
+    private static String validateAction(String action) {
+        if ("--installClient".equals(action) || "--installServer".equals(action) || "--fat-installer".equals(action)) {
+            return action;
+        }
+        throw new IllegalArgumentException("Unsupported installer action");
+    }
+
+    private static String validateVersion(String version) {
+        NeoForgeVersionApi.installerUrl(version);
+        return version;
+    }
+
+    private static File validateTarget(String target) {
+        if (target == null || target.isBlank()) {
+            throw new IllegalArgumentException("Installation directory must not be blank");
+        }
+        return Path.of(target).toAbsolutePath().normalize().toFile();
     }
 
     private static void showWindow() {
@@ -73,12 +96,6 @@ public final class WrapperInstaller {
         status.setEditable(false);
         status.setLineWrap(true);
         status.setWrapStyleWord(true);
-        JTextArea javaRequirement = new JTextArea();
-        javaRequirement.setEditable(false);
-        javaRequirement.setLineWrap(true);
-        javaRequirement.setWrapStyleWord(true);
-        javaRequirement.setOpaque(false);
-        javaRequirement.setVisible(false);
         JButton browse = new JButton("Choose directory");
         JButton install = new JButton("Download and install");
         final File[] target = {new File(System.getProperty("user.dir"))};
@@ -112,7 +129,7 @@ public final class WrapperInstaller {
                             ? new File(target[0], "neoforge-" + version + "-fat.jar")
                             : target[0];
                     publish("Using destination: " + destination.getAbsolutePath() + "\n");
-                    return OfficialInstallerLauncher.run(installerJar, action, version, destination);
+                    return OfficialInstallerLauncher.run(installerJar, action, destination);
                 }
 
                 @Override
@@ -133,11 +150,6 @@ public final class WrapperInstaller {
                 }
             }.execute();
         });
-        versions.addActionListener(event -> {
-            Object selected = versions.getSelectedItem();
-            updateJavaRequirement(javaRequirement, selected instanceof String ? (String) selected : null);
-        });
-
         JPanel top = new JPanel();
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
         top.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 18, 8, 18));
@@ -147,10 +159,6 @@ public final class WrapperInstaller {
         top.add(versionLabel);
         top.add(versions);
         top.add(Box.createVerticalStrut(5));
-        javaRequirement.setAlignmentX(JTextArea.LEFT_ALIGNMENT);
-        top.add(javaRequirement);
-        top.add(Box.createVerticalStrut(8));
-
         JPanel modesPanel = new JPanel();
         modesPanel.setLayout(new BoxLayout(modesPanel, BoxLayout.Y_AXIS));
         modesPanel.setAlignmentX(JPanel.LEFT_ALIGNMENT);
@@ -197,7 +205,6 @@ public final class WrapperInstaller {
                     for (String version : get()) {
                         versions.addItem(version);
                     }
-                    updateJavaRequirement(javaRequirement, (String) versions.getSelectedItem());
                     status.setText("Select an action and directory, then download the official installer.\n");
                 } catch (Exception exception) {
                     versions.removeAllItems();
@@ -207,22 +214,4 @@ public final class WrapperInstaller {
         }.execute();
     }
 
-    private static void updateJavaRequirement(JTextArea javaRequirement, String version) {
-        boolean visible = shouldShowJavaRequirement(version, OfficialInstallerLauncher.javaMajorVersion());
-        javaRequirement.setText(visible ? javaRequirementText(version) : "");
-        javaRequirement.setVisible(visible);
-        javaRequirement.revalidate();
-        javaRequirement.repaint();
-    }
-
-    static boolean shouldShowJavaRequirement(String version, int javaVersion) {
-        return OfficialInstallerLauncher.requiresConfiguredJavaVersion(version) && javaVersion < 25;
-    }
-
-    private static String javaRequirementText(String version) {
-        int javaVersion = OfficialInstallerLauncher.javaMajorVersion();
-        String current = javaVersion > 0 ? "Current Java: " + javaVersion + "." : "Current Java: unable to determine version.";
-        return "NeoForge " + version + " requires Java 25 or newer. " + current
-                + " Install Java 25 or newer and ensure it is first on PATH.";
-    }
 }
