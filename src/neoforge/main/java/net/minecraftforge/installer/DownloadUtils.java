@@ -30,6 +30,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import javax.net.ssl.SSLHandshakeException;
 import net.minecraftforge.installer.actions.ProgressCallback;
@@ -43,6 +45,7 @@ import net.minecraftforge.installer.json.Version.LibraryDownload;
 import org.jetbrains.annotations.Nullable;
 
 public class DownloadUtils {
+    private static final Logger LOGGER = Logger.getLogger(DownloadUtils.class.getName());
     public static final String MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     public static final String SERVER_STARTER_JAR = "https://github.com/NeoForged/serverstarterjar/releases/latest/download/server.jar";
 
@@ -88,7 +91,7 @@ public class DownloadUtils {
         try {
             return HashFunction.SHA1.hash(Files.readAllBytes(target.toPath())).toString();
         } catch (IOException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Unable to calculate SHA-1 for " + target, e);
             return null;
         }
     }
@@ -110,7 +113,7 @@ public class DownloadUtils {
         try {
             url = new URL(address);
         } catch (MalformedURLException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Invalid download URL: " + address, e);
             return null;
         }
 
@@ -147,11 +150,11 @@ public class DownloadUtils {
         } catch (SSLHandshakeException e) {
             System.out.println("Failed to establish connection to " + address);
             String host = url.getHost();
-            System.out.println(" Host: " + host + " [" + getIps(host).stream().collect(Collectors.joining(", ")) + "]");
-            e.printStackTrace();
+            System.out.println(" Host: " + host + " [" + String.join(", ", getIps(host)) + "]");
+            LOGGER.log(Level.WARNING, "TLS handshake failed for " + address, e);
             return null;
         } catch (IOException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Unable to connect to " + address, e);
             return null;
         }
     }
@@ -180,7 +183,7 @@ public class DownloadUtils {
             InetAddress[] addresses = InetAddress.getAllByName(host);
             return Arrays.stream(addresses).map(InetAddress::getHostAddress).collect(Collectors.toList());
         } catch (UnknownHostException e1) {
-            e1.printStackTrace();
+            LOGGER.log(Level.WARNING, "Unable to resolve host: " + host, e1);
         }
         return Collections.emptyList();
     }
@@ -194,7 +197,7 @@ public class DownloadUtils {
                 }
             }
         } catch (Throwable e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Unable to download mirror list from " + url, e);
         }
         return null;
     }
@@ -205,7 +208,7 @@ public class DownloadUtils {
                 .openStream()) {
             return Util.loadManifest(stream);
         } catch (IOException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Unable to download Minecraft manifest", e);
         }
         return null;
     }
@@ -218,7 +221,7 @@ public class DownloadUtils {
                 return true;
             }
         } catch (IOException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Unable to download file from " + url, e);
         }
         return false;
     }
@@ -237,7 +240,7 @@ public class DownloadUtils {
             Files.copy(input, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
             return checksumValid(target, checksum);
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Unable to extract " + art.getPath() + " to " + target, e);
             return false;
         }
     }
@@ -257,7 +260,7 @@ public class DownloadUtils {
             Files.copy(input, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
             return true; //checksumValid(target, checksum); //TODO: zip checksums?
         } catch (Exception e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Unable to extract " + path + " to " + target, e);
             return false;
         }
     }

@@ -158,7 +158,11 @@ public class Downloader {
             monitor.message("\tLibrary not cached, expecting download from " + url + ", but running in offline mode.");
             throw new RuntimeException("Running in offline mode, cannot download from " + url + ", cached version not found");
         }
-        return monitor.wrapStepDownload(DownloadUtils.getConnection(url));
+        URLConnection connection = DownloadUtils.getConnection(url);
+        if (connection == null) {
+            throw new IOException("Unable to establish connection to " + url);
+        }
+        return monitor.wrapStepDownload(connection);
     }
 
     public static class LocalFile {

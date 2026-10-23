@@ -82,7 +82,7 @@ public class OptionalLibrary {
                 artifacts.add(lib.getArtifact());
         }
 
-        if (artifacts.size() == 0)
+        if (artifacts.isEmpty())
             return true;
 
         File parent = json.getParentFile();

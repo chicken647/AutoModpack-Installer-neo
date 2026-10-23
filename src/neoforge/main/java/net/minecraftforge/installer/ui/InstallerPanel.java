@@ -34,10 +34,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.swing.AbstractAction;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -71,6 +74,7 @@ import net.minecraftforge.installer.json.OptionalLibrary;
 public class InstallerPanel extends JPanel {
     private static final Path INSTALLER_SETTINGS = new File(SimpleInstaller.getMCDir(), ".neoforge_installer.properties").toPath();
     public static final L10nManager TRANSLATIONS = new L10nManager("neoforged/installer", INSTALLER_SETTINGS);
+	private static final Logger LOGGER = Logger.getLogger(InstallerPanel.class.getName());
 
     private static final long serialVersionUID = 1L;
     private File targetDir;
@@ -166,7 +170,7 @@ public class InstallerPanel extends JPanel {
             final Box version = Box.createHorizontalBox();
             version.add(TRANSLATIONS.label("installer.welcome.version"));
             tag = new JLabel(profile.getVersion());
-            // and a bold part which represents the actual version
+            // and a bold part that represents the actual version
             tag.setFont(tag.getFont().deriveFont(Font.BOLD));
             version.add(tag);
             version.setAlignmentX(CENTER_ALIGNMENT);
@@ -396,7 +400,7 @@ public class InstallerPanel extends JPanel {
 
         final Locale current = TRANSLATIONS.getLocale();
         languageBox.setSelectedItem(known.stream().filter(locate -> locate.locale.equals(current)).findFirst().orElse(known.get(0)));
-        languageBox.addActionListener(e -> TRANSLATIONS.setLocale(((L10nManager.LocaleSelection) languageBox.getSelectedItem()).locale, true));
+        languageBox.addActionListener(e -> TRANSLATIONS.setLocale(((L10nManager.LocaleSelection) Objects.requireNonNull(languageBox.getSelectedItem())).locale, true));
 
         JButton proceedButton = TRANSLATIONS.button("installer.button.proceed");
         JButton cancelButton = TRANSLATIONS.button("installer.button.cancel");
@@ -442,7 +446,7 @@ public class InstallerPanel extends JPanel {
             SimpleInstaller.hookStdOut(prog);
             Predicate<String> optPred = input -> {
                 Optional<OptionalListEntry> ent = this.optionals.stream().filter(e -> e.lib.getArtifact().equals(input)).findFirst();
-                return !ent.isPresent() || ent.get().isEnabled();
+                return ent.isEmpty() || ent.get().isEnabled();
             };
             Action action = actions.get(choiceButtonGroup.getSelection().getActionCommand()).apply(prog);
             try {
@@ -457,7 +461,8 @@ public class InstallerPanel extends JPanel {
                 JOptionPane.showMessageDialog(null, TRANSLATIONS.translate("installer.installation.cancelled"), dialog.getTitle(), JOptionPane.WARNING_MESSAGE);
             } catch (Exception e) {
                 JOptionPane.showMessageDialog(null, "There was an exception running task: " + e.toString(), "Error", JOptionPane.ERROR_MESSAGE);
-                e.printStackTrace();
+				LOGGER.log(Level.SEVERE, "Error running task");
+                //e.printStackTrace();
             } finally {
                 prog.dispose();
                 SimpleInstaller.hookStdOut(monitor);

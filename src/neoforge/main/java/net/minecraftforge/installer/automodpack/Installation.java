@@ -6,16 +6,21 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.function.Consumer;
 
 public final class Installation {
     private Installation() {
     }
 
     public static void installAutomodpack(String gameVersion, Path minecraftDirectory) {
+        installAutomodpack(gameVersion, minecraftDirectory, System.out::println);
+    }
+
+    public static void installAutomodpack(String gameVersion, Path minecraftDirectory, Consumer<String> output) {
         try {
             String downloadUrl = ModrinthApi.getLatestDownloadUrl(gameVersion);
             if (downloadUrl == null) {
-                System.out.println("AutoModpack is not available for Minecraft " + gameVersion);
+                output.accept("AutoModpack is not available for Minecraft " + gameVersion);
                 return;
             }
 
@@ -23,12 +28,13 @@ public final class Installation {
             Files.createDirectories(modsDirectory);
             String path = new URL(downloadUrl).getPath();
             String fileName = path.substring(path.lastIndexOf('/') + 1);
-            System.out.println("Downloading AutoModpack " + fileName);
+            output.accept("Downloading AutoModpack " + fileName);
             try (InputStream input = new URL(downloadUrl).openStream()) {
                 Files.copy(input, modsDirectory.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
             }
+            output.accept("AutoModpack installed: " + modsDirectory.resolve(fileName));
         } catch (IOException e) {
-            System.out.println("Failed to download AutoModpack: " + e.getMessage());
+            output.accept("Failed to download AutoModpack: " + e.getMessage());
         }
     }
 

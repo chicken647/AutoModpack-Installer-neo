@@ -29,6 +29,8 @@ import java.security.cert.CertificateException;
 import java.util.Collections;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.logging.Logger;
+import java.util.logging.Level;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManagerFactory;
@@ -53,6 +55,7 @@ import net.minecraftforge.installer.actions.ProgressCallback;
  * The PEM files were obtained from the above URL.
  */
 class FixSSL {
+	private static final Logger LOGGER = Logger.getLogger("MinecraftForge");
     private static boolean hasJavaForDownload(ProgressCallback callback) {
         String javaVersion = System.getProperty("java.version");
         callback.message("Found java version " + javaVersion);
@@ -61,7 +64,7 @@ class FixSSL {
                 if (Integer.parseInt(javaVersion.substring("1.8.0_".length())) < 101)
                     return false;
             } catch (NumberFormatException e) {
-                e.printStackTrace();
+				LOGGER.log(Level.WARNING, e, () -> "Failed to parse java version");
                 callback.message("Could not parse java version!");
             }
         }
@@ -110,6 +113,7 @@ class FixSSL {
             callback.message("Added Lets Encrypt root certificates as additional trust");
         } catch (UncheckedKeyStoreException | KeyStoreException | IOException | NoSuchAlgorithmException | CertificateException | KeyManagementException e) {
             callback.message("Failed to load lets encrypt certificate. Expect problems", ProgressCallback.MessagePriority.HIGH);
+			LOGGER.log(Level.WARNING, e, () -> "Failed to load lets encrypt certificate");
             e.printStackTrace();
         }
     }

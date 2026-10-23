@@ -27,6 +27,8 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import net.minecraftforge.installer.json.InstallV1;
 import net.minecraftforge.installer.json.Util;
 import net.minecraftforge.installer.json.Version;
@@ -37,6 +39,7 @@ public class ClientInstall extends Action {
     public ClientInstall(InstallV1 profile, ProgressCallback monitor) {
         super(profile, monitor, true);
     }
+	private static final Logger LOGGER = Logger.getLogger("Installing");
 
     @Override
     public boolean run(File target, Predicate<String> optionals, File installer) throws ActionCanceledException {
@@ -69,13 +72,12 @@ public class ClientInstall extends Action {
             Files.copy(stream, json.toPath(), StandardCopyOption.REPLACE_EXISTING);
             monitor.message("Extracted launcher profile: " + json.getAbsolutePath());
         } catch (IOException e) {
-            error("  Failed to extract");
-            e.printStackTrace();
-            return false;
+			LOGGER.log(Level.WARNING, e, () -> "Failed to extract");
+			return false;
         }
         checkCancel();
 
-        // Download Vanilla main jar/json
+        // Vanilla main jar download
         monitor.stage("Considering minecraft client jar");
         File versionVanilla = new File(versionRoot, profile.getMinecraft());
         if (!versionVanilla.mkdirs() && !versionVanilla.isDirectory()) {
@@ -114,7 +116,6 @@ public class ClientInstall extends Action {
             }
         }
 
-        // Download Libraries
         if (!downloadLibraries(librariesDir, optionals, new ArrayList<>()))
             return false;
         checkCancel();
@@ -157,11 +158,8 @@ public class ClientInstall extends Action {
         monitor.stage("Injecting profile");
         if (launcherProfiles.exists() && !injectProfile(launcherProfiles))
             return false;
-        if (launcherProfilesMS.exists() && !injectProfile(launcherProfilesMS))
-            return false;
-
-        return true;
-    }
+		return !launcherProfilesMS.exists() || injectProfile(launcherProfilesMS);
+	}
 
     private boolean injectProfile(File target) {
         try {
@@ -170,7 +168,7 @@ public class ClientInstall extends Action {
                 json = JsonParser.parseReader(new InputStreamReader(stream, StandardCharsets.UTF_8)).getAsJsonObject();
             } catch (IOException e) {
                 error("Failed to read " + target);
-                e.printStackTrace();
+				LOGGER.log(Level.WARNING, e, () -> "Failed to read");
                 return false;
             }
 
@@ -192,9 +190,10 @@ public class ClientInstall extends Action {
             if (icon != null)
                 _profile.addProperty("icon", icon);
             String jstring = Util.GSON.toJson(json);
-            Files.write(target.toPath(), jstring.getBytes(StandardCharsets.UTF_8));
+            Files.writeString(target.toPath(), jstring);
         } catch (IOException e) {
             error("There was a problem writing the launch profile,  is it write protected?");
+			LOGGER.log(Level.WARNING, e, () -> "There was a problem writing the launch profile,  is it write protected?");
             return false;
         }
         return true;

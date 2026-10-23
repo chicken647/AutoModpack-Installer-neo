@@ -24,7 +24,7 @@ final class ModrinthApi {
         connection.setRequestMethod("GET");
 
         try (InputStreamReader reader = new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)) {
-            JsonArray versions = new JsonParser().parse(reader).getAsJsonArray();
+            JsonArray versions = JsonParser.parseReader(reader).getAsJsonArray();
             if (versions.isEmpty()) {
                 return null;
             }

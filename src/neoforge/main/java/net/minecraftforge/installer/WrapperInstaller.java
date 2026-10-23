@@ -6,8 +6,10 @@ import java.awt.Insets;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import net.minecraftforge.installer.automodpack.Installation;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
@@ -49,7 +51,7 @@ public final class WrapperInstaller {
             String version = validateVersion(args[1]);
             File target = validateTarget(args[2]);
             File installer = OfficialInstallerLauncher.download(version);
-            int exitCode = OfficialInstallerLauncher.run(installer, action, target);
+            int exitCode = runInstallation(installer, action, version, target);
             if (exitCode != 0) {
                 System.exit(exitCode);
             }
@@ -78,6 +80,35 @@ public final class WrapperInstaller {
         return Path.of(target).toAbsolutePath().normalize().toFile();
     }
 
+    private static int runInstallation(File installer, String action, String neoForgeVersion, File target)
+            throws java.io.IOException, InterruptedException {
+        return runInstallation(installer, action, neoForgeVersion, target, System.out::println);
+    }
+
+    private static int runInstallation(File installer, String action, String neoForgeVersion, File target,
+                                       Consumer<String> output) throws java.io.IOException, InterruptedException {
+        int exitCode = OfficialInstallerLauncher.run(installer, action, target, output);
+        if (exitCode == 0 && installsGame(action)) {
+            output.accept("NeoForge installation finished. Checking for AutoModpack... ");
+            Installation.installAutomodpack(minecraftVersion(neoForgeVersion), target.toPath(), output);
+        }
+        return exitCode;
+    }
+
+    static boolean installsGame(String action) {
+        return "--installClient".equals(action) || "--installServer".equals(action);
+    }
+
+    static String minecraftVersion(String neoForgeVersion) {
+        int separator = neoForgeVersion.indexOf('-');
+        String minecraftVersion = separator >= 0 ? neoForgeVersion.substring(0, separator) : neoForgeVersion;
+        String[] parts = minecraftVersion.split("\\.");
+        if (separator >= 0 || parts.length <= 2) {
+            return minecraftVersion;
+        }
+        return parts[0] + "." + parts[1];
+    }
+
     private static void showWindow() {
         JFrame frame = new JFrame("NeoForge Installer");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -98,6 +129,8 @@ public final class WrapperInstaller {
         status.setWrapStyleWord(true);
         JButton browse = new JButton("Choose directory");
         JButton install = new JButton("Download and install");
+        JLabel completion = new JLabel("Ready");
+        completion.setForeground(new java.awt.Color(90, 90, 90));
         final File[] target = {new File(System.getProperty("user.dir"))};
         JTextField directory = new JTextField(target[0].getAbsolutePath());
         directory.setEditable(false);
@@ -117,8 +150,17 @@ public final class WrapperInstaller {
             if (version == null || version.startsWith("Loading")) {
                 return;
             }
-            String action = client.isSelected() ? "--installClient" : server.isSelected() ? "--installServer" : "--fat-installer";
+            String action;
+            if (client.isSelected()) {
+                action = "--installClient";
+            } else if (server.isSelected()) {
+                action = "--installServer";
+            } else {
+                action = "--fat-installer";
+            }
             install.setEnabled(false);
+            completion.setText("Installing...");
+            completion.setForeground(new java.awt.Color(180, 110, 0));
             status.setText("Downloading official NeoForge " + version + " installer...\n");
             new SwingWorker<Integer, String>() {
                 @Override
@@ -129,7 +171,8 @@ public final class WrapperInstaller {
                             ? new File(target[0], "neoforge-" + version + "-fat.jar")
                             : target[0];
                     publish("Using destination: " + destination.getAbsolutePath() + "\n");
-                    return OfficialInstallerLauncher.run(installerJar, action, destination);
+                    publish("Running official NeoForge installer...\n");
+                    return runInstallation(installerJar, action, version, destination, line -> publish(line + "\n"));
                 }
 
                 @Override
@@ -142,9 +185,20 @@ public final class WrapperInstaller {
                     install.setEnabled(true);
                     try {
                         int result = get();
-                        status.append(result == 0 ? "Installation completed.\n" : "Official installer exited with code " + result + ".\n");
+                        if (result == 0) {
+                            status.append("Installation completed successfully.\n");
+                            completion.setText("Installation complete");
+                            completion.setForeground(new java.awt.Color(0, 128, 0));
+                            install.setText("Install again");
+                        } else {
+                            status.append("Official installer exited with code " + result + ".\n");
+                            completion.setText("Installation failed (exit code " + result + ")");
+                            completion.setForeground(java.awt.Color.RED);
+                        }
                     } catch (Exception exception) {
                         status.append("Installation failed: " + exception.getMessage() + "\n");
+                        completion.setText("Installation failed");
+                        completion.setForeground(java.awt.Color.RED);
                         JOptionPane.showMessageDialog(frame, exception.toString(), "Installation failed", JOptionPane.ERROR_MESSAGE);
                     }
                 }
@@ -186,6 +240,8 @@ public final class WrapperInstaller {
         buttonPanel.setLayout(new BoxLayout(buttonPanel, BoxLayout.X_AXIS));
         buttonPanel.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 18, 12, 18));
         buttonPanel.add(Box.createHorizontalGlue());
+        buttonPanel.add(completion);
+        buttonPanel.add(Box.createHorizontalStrut(12));
         buttonPanel.add(install);
         frame.add(buttonPanel, BorderLayout.SOUTH);
         frame.setMinimumSize(new Dimension(560, 360));

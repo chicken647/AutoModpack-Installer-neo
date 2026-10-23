@@ -17,9 +17,6 @@
  * This file is retained only for source compatibility with the inactive
  * embedded-installer sources. The project now builds WrapperInstaller, which
  * downloads and delegates to the official NeoForge installer.
- *
- * The former implementation depended on jopt-simple and cliutils, but is no
- * longer part of the project and must not be indexed as active installer code.
  */
 /*
 package net.minecraftforge.installer;
@@ -418,7 +415,9 @@ public class SimpleInstaller {
 
 package net.minecraftforge.installer;
 
+import java.io.File;
 import java.net.URL;
+import net.minecraftforge.installer.actions.ProgressCallback;
 
 /**
  * Compatibility state for source files from the inactive embedded installer.
@@ -431,5 +430,46 @@ public final class SimpleInstaller {
     public static boolean skipHashCheck;
 
     private SimpleInstaller() {
+    }
+
+    /**
+     * Returns the default Minecraft directory used by the inactive legacy UI.
+     */
+    public static File getMCDir() {
+        String home = System.getProperty("user.home", ".");
+        String os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        if (os.contains("win")) {
+            String appData = System.getenv("APPDATA");
+            return new File(appData != null ? appData : home, ".minecraft");
+        }
+        if (os.contains("mac")) {
+            return new File(new File(home, "Library/Application Support"), "minecraft");
+        }
+        return new File(home, ".minecraft");
+    }
+
+    /**
+     * Compatibility hook for the inactive legacy UI. The active wrapper uses
+     * its own output routing, but this keeps the legacy source self-consistent.
+     */
+    public static void hookStdOut(ProgressCallback monitor) {
+        if (monitor == null) {
+            return;
+        }
+        System.setOut(new java.io.PrintStream(new java.io.OutputStream() {
+            private final StringBuilder buffer = new StringBuilder();
+
+            @Override
+            public void write(int value) {
+                if (value == '\n') {
+                    if (!buffer.isEmpty()) {
+                        monitor.message(buffer.toString());
+                        buffer.setLength(0);
+                    }
+                } else if (value != '\r') {
+                    buffer.append((char) value);
+                }
+            }
+        }, true));
     }
 }
