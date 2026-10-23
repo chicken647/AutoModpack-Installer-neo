@@ -21,6 +21,14 @@ class LauncherProfileLocatorTest {
     }
 
     @Test
+    void findsProfilesInCustomLocation() throws Exception {
+        Path root = Files.createTempDirectory("custom-profiles");
+        Files.createDirectory(root.resolve("Custom profile"));
+
+        assertEquals(List.of(root.resolve("Custom profile")), LauncherProfileLocator.findProfiles(root));
+    }
+
+    @Test
     void usesKnownLauncherProfileLocations() {
         Path home = Path.of("home");
 

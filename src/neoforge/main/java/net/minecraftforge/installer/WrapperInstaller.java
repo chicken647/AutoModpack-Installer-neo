@@ -116,17 +116,22 @@ public final class WrapperInstaller {
 
         JComboBox<String> versions = new JComboBox<>();
         versions.addItem("Loading NeoForge versions...");
+
         JRadioButton client = new JRadioButton("Client", true);
         JRadioButton server = new JRadioButton("Server");
         JRadioButton fat = new JRadioButton("Fat installer");
+		JRadioButton custom = new JRadioButton("Custom installer");
         ButtonGroup modes = new ButtonGroup();
         modes.add(client);
         modes.add(server);
         modes.add(fat);
+		modes.add(custom);
+
         JTextArea status = new JTextArea("Loading versions from the official NeoForge Maven repository...");
         status.setEditable(false);
         status.setLineWrap(true);
         status.setWrapStyleWord(true);
+
         JButton browse = new JButton("Choose directory");
         JButton install = new JButton("Download and install");
         JLabel completion = new JLabel("Ready");
@@ -143,12 +148,21 @@ public final class WrapperInstaller {
         JComboBox<String> profileType = new JComboBox<>(new String[] {"CurseForge", "Modrinth"});
         JComboBox<Path> profiles = new JComboBox<>();
         profiles.setEnabled(false);
+        JButton chooseProfilesLocation = new JButton("Choose profiles location");
+        JTextField profilesLocation = new JTextField();
+        profilesLocation.setEditable(false);
+        profilesLocation.setCaretPosition(0);
 
         Runnable refreshProfiles = () -> {
             LauncherProfileLocator.Type type = profileType.getSelectedIndex() == 0
                     ? LauncherProfileLocator.Type.CURSEFORGE : LauncherProfileLocator.Type.MODRINTH;
             profiles.removeAllItems();
-            LauncherProfileLocator.findProfiles(type).forEach(profiles::addItem);
+            String location = profilesLocation.getText().trim();
+            if (location.isEmpty()) {
+                LauncherProfileLocator.findProfiles(type).forEach(profiles::addItem);
+            } else {
+                LauncherProfileLocator.findProfiles(Path.of(location)).forEach(profiles::addItem);
+            }
             profiles.setEnabled(launcherProfile.isSelected());
             if (launcherProfile.isSelected() && profiles.getItemCount() > 0) {
                 profiles.setSelectedIndex(0);
@@ -164,6 +178,16 @@ public final class WrapperInstaller {
         });
         launcherProfile.addActionListener(event -> refreshProfiles.run());
         profileType.addActionListener(event -> refreshProfiles.run());
+        chooseProfilesLocation.addActionListener(event -> {
+            JFileChooser chooser = new JFileChooser(profilesLocation.getText().isBlank()
+                    ? target[0] : new File(profilesLocation.getText()));
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
+                profilesLocation.setText(chooser.getSelectedFile().getAbsolutePath());
+                profilesLocation.setCaretPosition(0);
+                refreshProfiles.run();
+            }
+        });
         profiles.addActionListener(event -> {
             Path selected = (Path) profiles.getSelectedItem();
             if (selected != null && launcherProfile.isSelected()) {
@@ -254,6 +278,7 @@ public final class WrapperInstaller {
                 }
             }.execute();
         });
+
         JPanel top = new JPanel();
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
         top.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 18, 8, 18));
@@ -263,6 +288,7 @@ public final class WrapperInstaller {
         top.add(versionLabel);
         top.add(versions);
         top.add(Box.createVerticalStrut(5));
+
         JPanel modesPanel = new JPanel();
         modesPanel.setLayout(new BoxLayout(modesPanel, BoxLayout.Y_AXIS));
         modesPanel.setAlignmentX(JPanel.LEFT_ALIGNMENT);
@@ -275,6 +301,7 @@ public final class WrapperInstaller {
         modesPanel.add(client);
         modesPanel.add(server);
         modesPanel.add(fat);
+		modesPanel.add(custom);
         top.add(modesPanel);
         top.add(Box.createVerticalStrut(8));
 
@@ -285,10 +312,16 @@ public final class WrapperInstaller {
         launcherProfile.setMargin(new Insets(3, 3, 3, 3));
         targetModePanel.add(customDirectory);
         targetModePanel.add(launcherProfile);
+
         JPanel profilePanel = new JPanel(new BorderLayout(5, 5));
         profilePanel.add(profileType, BorderLayout.WEST);
         profilePanel.add(profiles, BorderLayout.CENTER);
         targetModePanel.add(profilePanel);
+
+        JPanel profilesLocationPanel = new JPanel(new BorderLayout(5, 5));
+        profilesLocationPanel.add(profilesLocation, BorderLayout.CENTER);
+        profilesLocationPanel.add(chooseProfilesLocation, BorderLayout.EAST);
+        targetModePanel.add(profilesLocationPanel);
         top.add(targetModePanel);
         top.add(Box.createVerticalStrut(5));
 
@@ -300,6 +333,7 @@ public final class WrapperInstaller {
         frame.add(top, BorderLayout.NORTH);
         status.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 18, 8, 18));
         frame.add(new JScrollPane(status), BorderLayout.CENTER);
+
         JPanel buttonPanel = new JPanel();
         buttonPanel.setLayout(new BoxLayout(buttonPanel, BoxLayout.X_AXIS));
         buttonPanel.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 18, 12, 18));

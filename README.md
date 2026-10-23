@@ -1,2 +1,2 @@
 # AutoModpack + NeoForge installer
-This is a thin NeoForge installer wrapper. It lists available NeoForge versions, downloads the selected official NeoForge installer from the NeoForge Maven repository, and delegates the installation to that official installer.
+This is a thin NeoForge installer wrapper. It lists available NeoForge versions, downloads the selected official NeoForge installer from the NeoForge Maven repository, and delegates the installation to that official installer. 
