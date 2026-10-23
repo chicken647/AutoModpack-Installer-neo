@@ -135,6 +135,43 @@ public final class WrapperInstaller {
         JTextField directory = new JTextField(target[0].getAbsolutePath());
         directory.setEditable(false);
         directory.setCaretPosition(0);
+        JRadioButton customDirectory = new JRadioButton("Custom directory", true);
+        JRadioButton launcherProfile = new JRadioButton("Launcher profile");
+        ButtonGroup targetModes = new ButtonGroup();
+        targetModes.add(customDirectory);
+        targetModes.add(launcherProfile);
+        JComboBox<String> profileType = new JComboBox<>(new String[] {"CurseForge", "Modrinth"});
+        JComboBox<Path> profiles = new JComboBox<>();
+        profiles.setEnabled(false);
+
+        Runnable refreshProfiles = () -> {
+            LauncherProfileLocator.Type type = profileType.getSelectedIndex() == 0
+                    ? LauncherProfileLocator.Type.CURSEFORGE : LauncherProfileLocator.Type.MODRINTH;
+            profiles.removeAllItems();
+            LauncherProfileLocator.findProfiles(type).forEach(profiles::addItem);
+            profiles.setEnabled(launcherProfile.isSelected());
+            if (launcherProfile.isSelected() && profiles.getItemCount() > 0) {
+                profiles.setSelectedIndex(0);
+                target[0] = profiles.getItemAt(0).toFile();
+                directory.setText(target[0].getAbsolutePath());
+                directory.setCaretPosition(0);
+            }
+        };
+
+        customDirectory.addActionListener(event -> {
+            profiles.setEnabled(false);
+            directory.setText(target[0].getAbsolutePath());
+        });
+        launcherProfile.addActionListener(event -> refreshProfiles.run());
+        profileType.addActionListener(event -> refreshProfiles.run());
+        profiles.addActionListener(event -> {
+            Path selected = (Path) profiles.getSelectedItem();
+            if (selected != null && launcherProfile.isSelected()) {
+                target[0] = selected.toFile();
+                directory.setText(target[0].getAbsolutePath());
+                directory.setCaretPosition(0);
+            }
+        });
 
         browse.addActionListener(event -> {
             JFileChooser chooser = new JFileChooser(target[0]);
@@ -143,11 +180,24 @@ public final class WrapperInstaller {
                 target[0] = chooser.getSelectedFile();
                 directory.setText(target[0].getAbsolutePath());
                 directory.setCaretPosition(0);
+                if (launcherProfile.isSelected()) {
+                    profiles.addItem(target[0].toPath());
+                    profiles.setSelectedItem(target[0].toPath());
+                } else {
+                    customDirectory.setSelected(true);
+                    profiles.setEnabled(false);
+                }
             }
         });
         install.addActionListener(event -> {
             String version = (String) versions.getSelectedItem();
             if (version == null || version.startsWith("Loading")) {
+                return;
+            }
+            if (launcherProfile.isSelected() && profiles.getSelectedItem() == null) {
+                status.setText("No " + profileType.getSelectedItem() + " profiles were found. Choose a profile directory first.\n");
+                completion.setText("Profile required");
+                completion.setForeground(java.awt.Color.RED);
                 return;
             }
             String action;
@@ -227,6 +277,20 @@ public final class WrapperInstaller {
         modesPanel.add(fat);
         top.add(modesPanel);
         top.add(Box.createVerticalStrut(8));
+
+        JPanel targetModePanel = new JPanel();
+        targetModePanel.setLayout(new BoxLayout(targetModePanel, BoxLayout.Y_AXIS));
+        targetModePanel.setAlignmentX(JPanel.LEFT_ALIGNMENT);
+        customDirectory.setMargin(new Insets(3, 3, 3, 3));
+        launcherProfile.setMargin(new Insets(3, 3, 3, 3));
+        targetModePanel.add(customDirectory);
+        targetModePanel.add(launcherProfile);
+        JPanel profilePanel = new JPanel(new BorderLayout(5, 5));
+        profilePanel.add(profileType, BorderLayout.WEST);
+        profilePanel.add(profiles, BorderLayout.CENTER);
+        targetModePanel.add(profilePanel);
+        top.add(targetModePanel);
+        top.add(Box.createVerticalStrut(5));
 
         JPanel directoryPanel = new JPanel(new BorderLayout(5, 5));
         directoryPanel.setAlignmentX(JPanel.LEFT_ALIGNMENT);

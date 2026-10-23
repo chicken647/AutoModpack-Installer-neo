@@ -53,6 +53,7 @@ sourceSets {
             ])
             include 'net/minecraftforge/installer/WrapperInstaller.java'
             include 'net/minecraftforge/installer/OfficialInstallerLauncher.java'
+            include 'net/minecraftforge/installer/LauncherProfileLocator.java'
             include 'net/minecraftforge/installer/NeoForgeVersionApi.java'
             include 'net/minecraftforge/installer/automodpack/Installation.java'
             include 'net/minecraftforge/installer/automodpack/ModrinthApi.java'
@@ -70,6 +71,7 @@ sourceSets {
             ])
             include 'net/minecraftforge/installer/NeoForgeVersionApiTest.java'
             include 'net/minecraftforge/installer/OfficialInstallerLauncherTest.java'
+            include 'net/minecraftforge/installer/LauncherProfileLocatorTest.java'
             include 'net/minecraftforge/installer/WrapperInstallerTest.java'
             include 'net/minecraftforge/installer/automodpack/ModrinthApiTest.java'
         }
