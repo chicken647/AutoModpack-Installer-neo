@@ -22,8 +22,7 @@ final class LauncherProfileLocator {
         }
     }
 
-    private LauncherProfileLocator() {
-    }
+    private LauncherProfileLocator() {}
 
     static List<Path> findProfiles(Type type) {
         List<Path> profiles = new ArrayList<>();
@@ -50,19 +49,19 @@ final class LauncherProfileLocator {
             Path appData = home.resolve("AppData").resolve("Roaming");
             return type == Type.CURSEFORGE
                     ? List.of(home.resolve("curseforge").resolve("minecraft").resolve("Instances"),
-                    appData.resolve("CurseForge").resolve("minecraft").resolve("Instances"))
+                            appData.resolve("CurseForge").resolve("minecraft").resolve("Instances"))
                     : List.of(appData.resolve("ModrinthApp").resolve("profiles"));
         }
         if (os.contains("mac")) {
             Path appData = home.resolve("Library").resolve("Application Support");
             return type == Type.CURSEFORGE
                     ? List.of(home.resolve("Documents").resolve("curseforge").resolve("minecraft").resolve("Instances"),
-                    appData.resolve("curseforge").resolve("minecraft").resolve("Instances"))
+                            appData.resolve("curseforge").resolve("minecraft").resolve("Instances"))
                     : List.of(appData.resolve("ModrinthApp").resolve("profiles"));
         }
         return type == Type.CURSEFORGE
                 ? List.of(home.resolve("Documents").resolve("curseforge").resolve("minecraft").resolve("Instances"),
-                home.resolve(".curseforge").resolve("minecraft").resolve("Instances"))
+                        home.resolve(".curseforge").resolve("minecraft").resolve("Instances"))
                 : List.of(home.resolve(".local").resolve("share").resolve("ModrinthApp").resolve("profiles"));
     }
 
