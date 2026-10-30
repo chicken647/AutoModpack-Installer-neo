@@ -26,10 +26,16 @@ final class LauncherProfileLocator {
 
     static List<Path> findProfiles(Type type) {
         List<Path> profiles = new ArrayList<>();
-        for (Path root : profileRoots(type, Path.of(System.getProperty("user.home")), System.getProperty("os.name", ""))) {
+        for (Path root : existingProfileRoots(type, Path.of(System.getProperty("user.home")), System.getProperty("os.name", ""))) {
             profiles.addAll(findProfiles(root));
         }
         return profiles;
+    }
+
+    static List<Path> existingProfileRoots(Type type, Path home, String osName) {
+        return profileRoots(type, home, osName).stream()
+                .filter(Files::isDirectory)
+                .toList();
     }
 
     static List<Path> findProfiles(Path root) {
