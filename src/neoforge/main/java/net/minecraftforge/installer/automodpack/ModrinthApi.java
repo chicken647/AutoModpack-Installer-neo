@@ -3,7 +3,6 @@ package net.minecraftforge.installer.automodpack;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -14,8 +13,7 @@ final class ModrinthApi {
     private static final String PROJECT_ID = "k68glP2e";
     private static final String USER_AGENT = "AutoModpack-NeoForge-Installer/1.0";
 
-    private ModrinthApi() {
-    }
+    private ModrinthApi() {}
 
     static String getLatestDownloadUrl(String gameVersion) throws IOException {
         String endpoint = buildApiUrl(gameVersion);

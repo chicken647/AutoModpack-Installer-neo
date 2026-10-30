@@ -13,9 +13,6 @@ import net.minecraftforge.installer.automodpack.Installation;
 
 public final class WrapperInstaller {
     private static final Logger LOGGER = Logger.getLogger(WrapperInstaller.class.getName());
-	final static boolean shouldFill = true;
-	final static boolean shouldWeightX = true;
-	final static boolean RIGHT_TO_LEFT = false;
 
     private WrapperInstaller() {
     }
@@ -28,11 +25,10 @@ public final class WrapperInstaller {
 				LOGGER.log(Level.WARNING, "Failed to set system look and feel", e);
 			}
 		});
-		if (args.length > 0) {
+  if (args.length > 0) {
             runCommandLine(args);
         } else {
-            javax.swing.SwingUtilities.invokeLater(WrapperInstaller::showWindow);
-			javax.swing.SwingUtilities.invokeLater(WrapperInstaller::createAndShowGUI);
+            SwingUtilities.invokeLater(() -> new WrapperInstaller().createAndShowGUI("Ready", Color.GRAY));
         }
     }
 
@@ -105,110 +101,25 @@ public final class WrapperInstaller {
     }
 
 	public static void addComponentsToPane(Container pane) {
-		if (RIGHT_TO_LEFT) {
-			pane.setComponentOrientation(ComponentOrientation.RIGHT_TO_LEFT);
-		}
-
 		pane.setLayout(new GridBagLayout());
-		GridBagConstraints c = new GridBagConstraints();
-			if (shouldFill) {
-				c.fill = GridBagConstraints.HORIZONTAL;
-			}
-
-		JLabel jlabel;
-		JComboBox<String> stringJComboBox;
-		JRadioButton radioButton;
-		JFrame jFrame;
-
-
-		JLabel versionLabel = new JLabel("NeoForge version:");
-			if (shouldWeightX) {
-				c.weightx = 0.5;
-			}
-			c.fill = GridBagConstraints.HORIZONTAL;
-			c.gridx = 0;
-			c.gridy = 0;
-			pane.add(versionLabel, c);
-
-		JComboBox<String> versions = new JComboBox<>();
-			if (shouldWeightX) {
-				c.weightx = 0.5;
-			}
-			c.fill = GridBagConstraints.HORIZONTAL;
-			c.insets = new Insets(5, 0, 5, 0);
-			c.gridx = 0;
-			c.gridy = 0;
-			pane.add(versions, c);
-
-		radioButton = new JRadioButton("client");
-			c.weightx = 0.5;
-			c.gridx = 0;
-			c.gridy = 1;
-			pane.add(radioButton, c);
-
-		radioButton = new JRadioButton("server");
-			c.weightx = 0.5;
-			c.gridx = 0;
-			c.gridy = 2;
-			pane.add(radioButton, c);
-
-		radioButton = new JRadioButton("fat");
-			c.weightx = 0.5;
-			c.gridx = 0;
-			c.gridy = 3;
-			pane.add(radioButton, c);
-
-		radioButton = new JRadioButton("custom");
-			c.weightx = 0.5;
-			c.gridx = 0;
-			c.gridy = 4;
-			pane.add(radioButton, c);
+		pane.add(new JLabel("NeoForge Installer"), constraints(0, 0, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		pane.add(new JLabel("Use the controls below to select a version and destination."),
+				constraints(0, 1, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
 	}
 
-	public class addStatusBoxGrid extends JPanel {
-
-		private final JLabel statusLabel1;
-		private final JLabel statusLabel2;
-		private final JLabel statusLabel3;
-		private final JPanel statusIndicator1;
-		private final JPanel statusIndicator2;
-		private final JPanel statusIndicator3;
-
-		public addStatusBoxGrid() {
-			setLayout(new GridBagLayout());
-			setBorder(BorderFactory.createTitledBorder("Status"));
-			GridBagConstraints c = new GridBagConstraints();
-
-			c.insets = new Insets(5, 5, 5, 5);
-			c.fill = GridBagConstraints.HORIZONTAL;
-			c.gridx = 0;
-			c.gridy = 0;
-
-			this.statusIndicator1 = createStatusIndicator(Color.GREEN);
-			c.gridx = 2;
-			add(this.statusIndicator1, c);
-
-			this.statusIndicator2 = createStatusIndicator(Color.RED);
-			c.gridx = 2;
-			add(this.statusIndicator2, c);
-
-			this.statusIndicator3 = createStatusIndicator(Color.ORANGE);
-			c.gridx = 2;
-			add(this.statusIndicator3, c);
-
-			this.statusLabel1 = new JLabel("Success");
-			c.gridx = 0;
-			add(this.statusLabel1, c);
-
-			this.statusLabel2 = new JLabel("Failure");
-			c.gridx = 0;
-			add(this.statusLabel2, c);
-
-			this.statusLabel3 = new JLabel("In Progress");
-			c.gridx = 0;
-			add(this.statusLabel3, c);
-
-		}
+	private static GridBagConstraints constraints(int x, int y, int width, int height,
+			double weightX, double weightY, int fill) {
+		GridBagConstraints constraints = new GridBagConstraints();
+		constraints.gridx = x;
+		constraints.gridy = y;
+		constraints.gridwidth = width;
+		constraints.gridheight = height;
+		constraints.weightx = weightX;
+		constraints.weighty = weightY;
+		constraints.fill = fill;
+		constraints.anchor = GridBagConstraints.WEST;
+		constraints.insets = new Insets(6, 8, 6, 8);
+		return constraints;
 	}
 
 	private JPanel createStatusIndicator(Color color) {
@@ -231,19 +142,172 @@ public final class WrapperInstaller {
 
 	private void createAndShowGUI(String label, Color color) {
 		JFrame frame = new JFrame("NeoForge Installer");
-		frame.setLocationRelativeTo(null);
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		addComponentsToPane(frame.getContentPane());
-		JPanel statusBox = new JPanel();
-		statusBox.setLayout(new FlowLayout(FlowLayout.LEFT));
-		statusBox.add(createStatusIndicator(color));
-		statusBox.add(new JLabel(label));
-		frame.add(new JPanel(new GridBagLayout()).add(new addStatusBoxGrid()));
+		frame.setContentPane(createInstallerPanel(frame, label, color));
 		frame.pack();
+		frame.setMinimumSize(new Dimension(640, 460));
+		frame.setLocationRelativeTo(null);
 		frame.setVisible(true);
 	}
 
-    private static void showWindow() {
+	private JPanel createInstallerPanel(JFrame frame, String initialLabel, Color initialColor) {
+		JPanel panel = new JPanel(new GridBagLayout());
+		panel.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
+		addComponentsToPane(panel);
+		JComboBox<String> versions = new JComboBox<>(new String[] {"Loading NeoForge versions..."});
+		JComboBox<String> action = new JComboBox<>(new String[] {"Client", "Server", "Fat installer"});
+		JTextField directory = new JTextField(new File(System.getProperty("user.dir")).getAbsolutePath());
+		directory.setEditable(false);
+		JTextArea status = new JTextArea("Loading versions from the official NeoForge Maven repository...", 8, 40);
+		status.setEditable(false);
+		status.setLineWrap(true);
+		status.setWrapStyleWord(true);
+		JLabel completion = new JLabel(initialLabel);
+		completion.setForeground(initialColor);
+		JButton browse = new JButton("Choose directory");
+		JButton install = new JButton("Download and install");
+
+		JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+		toolbar.add(new JLabel("Install action:"));
+		toolbar.add(action);
+		toolbar.add(browse);
+		toolbar.add(install);
+		panel.add(toolbar, constraints(0, 2, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JLabel("NeoForge version:"), constraints(0, 3, 1, 1, 0, 0, GridBagConstraints.NONE));
+		panel.add(versions, constraints(0, 4, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JLabel("Destination:"), constraints(0, 5, 1, 1, 0, 0, GridBagConstraints.NONE));
+		panel.add(directory, constraints(0, 6, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JScrollPane(status), constraints(0, 7, 1, 1, 1, 1, GridBagConstraints.BOTH));
+		StatusBox statusBox = new StatusBox();
+		panel.add(statusBox, constraints(0, 8, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(completion, constraints(0, 9, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+
+		final File[] target = {new File(directory.getText())};
+		browse.addActionListener(event -> {
+			JFileChooser chooser = new JFileChooser(target[0]);
+			chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+			if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
+				target[0] = chooser.getSelectedFile();
+				directory.setText(target[0].getAbsolutePath());
+			}
+		});
+		install.addActionListener(event -> startInstallation(frame, versions, action, target[0], status, completion, install, statusBox));
+		loadVersions(versions, status);
+		return panel;
+	}
+
+	private static void loadVersions(JComboBox<String> versions, JTextArea status) {
+		new SwingWorker<List<String>, Void>() {
+			@Override
+			protected List<String> doInBackground() throws Exception {
+				return NeoForgeVersionApi.getVersions();
+			}
+
+			@Override
+			protected void done() {
+				try {
+					versions.removeAllItems();
+					for (String version : get()) {
+						versions.addItem(version);
+					}
+					status.setText("Select an action and destination, then download the official installer.\n");
+				} catch (Exception exception) {
+					versions.removeAllItems();
+					status.setText("Could not load NeoForge versions: " + exception.getMessage());
+				}
+			}
+		}.execute();
+	}
+
+	private static void startInstallation(JFrame frame, JComboBox<String> versions, JComboBox<String> action,
+			File target, JTextArea status, JLabel completion, JButton install, StatusBox statusBox) {
+		String version = (String) versions.getSelectedItem();
+		if (version == null || version.startsWith("Loading")) {
+			return;
+		}
+		String selectedAction = switch ((String) action.getSelectedItem()) {
+			case "Server" -> "--installServer";
+			case "Fat installer" -> "--fat-installer";
+			default -> "--installClient";
+		};
+		install.setEnabled(false);
+		completion.setText("Installing...");
+		completion.setForeground(new Color(180, 110, 0));
+		statusBox.setState(StatusBox.State.IN_PROGRESS);
+		status.setText("Downloading official NeoForge " + version + " installer...\n");
+		new SwingWorker<Integer, String>() {
+			@Override
+			protected Integer doInBackground() throws Exception {
+				File installerJar = OfficialInstallerLauncher.download(version);
+				publish("Downloaded official installer: " + installerJar + "\nStarting installation...\n");
+				File destination = selectedAction.equals("--fat-installer")
+						? new File(target, "neoforge-" + version + "-fat.jar") : target;
+				return runInstallation(installerJar, selectedAction, version, destination, line -> publish(line + "\n"));
+			}
+
+			@Override
+			protected void process(List<String> messages) {
+				messages.forEach(status::append);
+			}
+
+			@Override
+			protected void done() {
+				install.setEnabled(true);
+				try {
+					int result = get();
+					if (result == 0) {
+						status.append("Installation completed successfully.\n");
+						completion.setText("Installation complete");
+						completion.setForeground(new Color(0, 128, 0));
+						statusBox.setState(StatusBox.State.SUCCESS);
+					} else {
+						status.append("Official installer exited with code " + result + ".\n");
+						completion.setText("Installation failed (exit code " + result + ")");
+						completion.setForeground(Color.RED);
+						statusBox.setState(StatusBox.State.FAILURE);
+					}
+				} catch (Exception exception) {
+					status.append("Installation failed: " + exception.getMessage() + "\n");
+					completion.setText("Installation failed");
+					completion.setForeground(Color.RED);
+					statusBox.setState(StatusBox.State.FAILURE);
+					JOptionPane.showMessageDialog(frame, exception.toString(), "Installation failed", JOptionPane.ERROR_MESSAGE);
+				}
+			}
+		}.execute();
+	}
+
+	private static final class StatusBox extends JPanel {
+		enum State { SUCCESS, FAILURE, IN_PROGRESS }
+
+		private final JLabel label = new JLabel("Ready");
+		private final JPanel indicator = new JPanel();
+
+		StatusBox() {
+			setLayout(new GridBagLayout());
+			setBorder(BorderFactory.createTitledBorder("Status"));
+			indicator.setPreferredSize(new Dimension(16, 16));
+			add(indicator, constraints(0, 0, 1, 1, 0, 0, GridBagConstraints.NONE));
+			add(label, constraints(1, 0, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+			setState(State.IN_PROGRESS);
+		}
+
+		void setState(State state) {
+			Color color = switch (state) {
+				case SUCCESS -> Color.GREEN;
+				case FAILURE -> Color.RED;
+				case IN_PROGRESS -> Color.ORANGE;
+			};
+			label.setText(switch (state) {
+				case SUCCESS -> "Success";
+				case FAILURE -> "Failure";
+				case IN_PROGRESS -> "In progress";
+			});
+			indicator.setBackground(color);
+		}
+	}
+
+    private static void legacyShowWindow() {
         JFrame frame = new JFrame("NeoForge Installer");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 

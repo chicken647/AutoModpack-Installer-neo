@@ -9,8 +9,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.function.Consumer;
 
 public final class Installation {
-    private Installation() {
-    }
+    private Installation() {}
 
     public static void installAutomodpack(String gameVersion, Path minecraftDirectory) {
         installAutomodpack(gameVersion, minecraftDirectory, System.out::println);

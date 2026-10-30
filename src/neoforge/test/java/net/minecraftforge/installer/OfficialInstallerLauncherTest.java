@@ -1,8 +1,8 @@
 package net.minecraftforge.installer;
 
-import org.junit.jupiter.api.Test;
-
 import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import org.junit.jupiter.api.Test;
 
 class OfficialInstallerLauncherTest {
     @Test

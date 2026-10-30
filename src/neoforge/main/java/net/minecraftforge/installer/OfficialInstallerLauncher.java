@@ -15,8 +15,7 @@ final class OfficialInstallerLauncher {
     private static final String OFFICIAL_HOST = "maven.neoforged.net";
     private static final Pattern VERSION_PATTERN = Pattern.compile("\\d+(?:\\.\\d+)+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?");
 
-    private OfficialInstallerLauncher() {
-    }
+    private OfficialInstallerLauncher() {}
 
     static File download(String version) throws IOException {
         String safeVersion = sanitizeVersion(version);

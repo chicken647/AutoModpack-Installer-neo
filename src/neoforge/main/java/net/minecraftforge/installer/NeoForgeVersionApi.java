@@ -15,8 +15,7 @@ final class NeoForgeVersionApi {
     private static final String INSTALLER_URL = "https://maven.neoforged.net/releases/net/neoforged/neoforge/%s/neoforge-%s-installer.jar";
     private static final Pattern VERSION_PATTERN = Pattern.compile("\\d+(?:\\.\\d+)+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?");
 
-    private NeoForgeVersionApi() {
-    }
+    private NeoForgeVersionApi() {}
 
     static List<String> getVersions() throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(METADATA_URL).openConnection();
