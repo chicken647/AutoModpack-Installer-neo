@@ -102,9 +102,8 @@ public final class WrapperInstaller {
 
 	public static void addComponentsToPane(Container pane) {
 		pane.setLayout(new GridBagLayout());
-		pane.add(new JLabel("NeoForge Installer"), constraints(0, 0, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
 		pane.add(new JLabel("Use the controls below to select a version and destination."),
-				constraints(0, 1, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+				constraints(0, 0, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
 	}
 
 	private static GridBagConstraints constraints(int x, int y, int width, int height,
@@ -158,6 +157,15 @@ public final class WrapperInstaller {
 		JComboBox<String> action = new JComboBox<>(new String[] {"Client", "Server", "Fat installer"});
 		JTextField directory = new JTextField(new File(System.getProperty("user.dir")).getAbsolutePath());
 		directory.setEditable(false);
+		JComboBox<String> targetMode = new JComboBox<>(new String[] {"Custom directory", "Launcher profile"});
+		JComboBox<String> profileType = new JComboBox<>(new String[] {"CurseForge", "Modrinth"});
+		JComboBox<Path> profiles = new JComboBox<>();
+		profiles.setEnabled(false);
+		JComboBox<String> profilesLocationMode = new JComboBox<>(new String[] {
+				"Detect launcher profile locations", "Use custom profile location"});
+		JTextField profilesLocation = new JTextField();
+		profilesLocation.setEditable(false);
+		JButton chooseProfilesLocation = new JButton("Browse…");
 		JTextArea status = new JTextArea("Loading versions from the official NeoForge Maven repository...", 8, 40);
 		status.setEditable(false);
 		status.setLineWrap(true);
@@ -170,30 +178,143 @@ public final class WrapperInstaller {
 		JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
 		toolbar.add(new JLabel("Install action:"));
 		toolbar.add(action);
-		toolbar.add(browse);
 		toolbar.add(install);
 		panel.add(toolbar, constraints(0, 2, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
 		panel.add(new JLabel("NeoForge version:"), constraints(0, 3, 1, 1, 0, 0, GridBagConstraints.NONE));
 		panel.add(versions, constraints(0, 4, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(new JLabel("Destination:"), constraints(0, 5, 1, 1, 0, 0, GridBagConstraints.NONE));
-		panel.add(directory, constraints(0, 6, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(new JScrollPane(status), constraints(0, 7, 1, 1, 1, 1, GridBagConstraints.BOTH));
+		panel.add(new JLabel("Install destination:"), constraints(0, 5, 1, 1, 0, 0, GridBagConstraints.NONE));
+		JPanel targetModePanel = new JPanel(new BorderLayout(6, 0));
+		targetModePanel.add(targetMode, BorderLayout.WEST);
+		panel.add(targetModePanel, constraints(0, 6, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		JPanel profilePanel = new JPanel(new BorderLayout(6, 0));
+		profilePanel.add(profileType, BorderLayout.WEST);
+		profilePanel.add(profiles, BorderLayout.CENTER);
+		panel.add(profilePanel, constraints(0, 7, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		JPanel profilesLocationPanel = new JPanel(new BorderLayout(6, 0));
+		JPanel profilesLocationDetails = new JPanel(new BorderLayout(6, 0));
+		profilesLocationDetails.add(new JLabel("Profile location:"), BorderLayout.WEST);
+		profilesLocationDetails.add(profilesLocation, BorderLayout.CENTER);
+		profilesLocationPanel.add(profilesLocationMode, BorderLayout.NORTH);
+		profilesLocationPanel.add(profilesLocationDetails, BorderLayout.CENTER);
+		profilesLocationPanel.add(chooseProfilesLocation, BorderLayout.EAST);
+		panel.add(profilesLocationPanel, constraints(0, 8, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		JPanel directoryPanel = new JPanel(new BorderLayout(6, 0));
+		directoryPanel.add(directory, BorderLayout.CENTER);
+		directoryPanel.add(browse, BorderLayout.EAST);
+		panel.add(directoryPanel, constraints(0, 9, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JScrollPane(status), constraints(0, 10, 1, 1, 1, 1, GridBagConstraints.BOTH));
 		StatusBox statusBox = new StatusBox();
-		panel.add(statusBox, constraints(0, 8, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(completion, constraints(0, 9, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(statusBox, constraints(0, 11, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(completion, constraints(0, 12, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		profilePanel.setVisible(false);
+		profilesLocationPanel.setVisible(false);
 
 		final File[] target = {new File(directory.getText())};
+		final File[] customTarget = {target[0]};
+		Runnable refreshProfiles = () -> {
+			LauncherProfileLocator.Type type = profileType.getSelectedIndex() == 0
+					? LauncherProfileLocator.Type.CURSEFORGE : LauncherProfileLocator.Type.MODRINTH;
+			profiles.removeAllItems();
+			boolean customLocation = profilesLocationMode.getSelectedIndex() == 1;
+			List<Path> roots = customLocation
+					? customProfileRoots(profilesLocation.getText())
+					: LauncherProfileLocator.existingProfileRoots(type, Path.of(System.getProperty("user.home")),
+							System.getProperty("os.name", ""));
+			List<Path> found = roots.stream()
+					.flatMap(root -> LauncherProfileLocator.findProfiles(root).stream())
+					.toList();
+			if (!customLocation) {
+				profilesLocation.setText(roots.isEmpty() ? "No detected location" : roots.get(0).toString());
+			}
+			found.forEach(profiles::addItem);
+			boolean launcherProfileSelected = targetMode.getSelectedIndex() == 1;
+			profiles.setEnabled(launcherProfileSelected);
+			chooseProfilesLocation.setEnabled(launcherProfileSelected && customLocation);
+			if (launcherProfileSelected && profiles.getItemCount() > 0) {
+				profiles.setSelectedIndex(0);
+				target[0] = profiles.getItemAt(0).toFile();
+				directory.setText(target[0].getAbsolutePath());
+			}
+		};
+		Runnable updateProfilesLocationControls = () -> {
+			boolean customLocation = profilesLocationMode.getSelectedIndex() == 1;
+			profilesLocation.setText(customLocation ? "" : "Detecting...");
+			profilesLocation.setToolTipText(customLocation
+					? "Choose the folder that contains the CurseForge or Modrinth profile folders."
+					: "Detected profile locations for the selected launcher.");
+			chooseProfilesLocation.setEnabled(customLocation && targetMode.getSelectedIndex() == 1);
+			refreshProfiles.run();
+		};
+		Runnable updateDestinationControls = () -> {
+			boolean launcherProfileSelected = targetMode.getSelectedIndex() == 1;
+			profilePanel.setVisible(launcherProfileSelected);
+			profilesLocationPanel.setVisible(launcherProfileSelected);
+			directoryPanel.setVisible(!launcherProfileSelected);
+			profiles.setEnabled(launcherProfileSelected);
+			if (launcherProfileSelected) {
+				refreshProfiles.run();
+			} else {
+				target[0] = customTarget[0];
+				directory.setText(target[0].getAbsolutePath());
+			}
+			panel.revalidate();
+			panel.repaint();
+		};
+		targetMode.addActionListener(event -> updateDestinationControls.run());
+		profilesLocationMode.addActionListener(event -> updateProfilesLocationControls.run());
+		profileType.addActionListener(event -> refreshProfiles.run());
+		profiles.addActionListener(event -> {
+			Path selected = (Path) profiles.getSelectedItem();
+			if (selected != null && targetMode.getSelectedIndex() == 1) {
+				target[0] = selected.toFile();
+				directory.setText(target[0].getAbsolutePath());
+			}
+		});
+		chooseProfilesLocation.addActionListener(event -> {
+			File start = profilesLocation.getText().isBlank() || profilesLocation.getText().equals("Detecting...")
+					? target[0] : new File(profilesLocation.getText());
+			JFileChooser chooser = new JFileChooser(start);
+			chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+			if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
+				profilesLocation.setText(chooser.getSelectedFile().getAbsolutePath());
+				refreshProfiles.run();
+			}
+		});
 		browse.addActionListener(event -> {
 			JFileChooser chooser = new JFileChooser(target[0]);
 			chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
 			if (chooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
 				target[0] = chooser.getSelectedFile();
+				if (targetMode.getSelectedIndex() == 0) {
+					customTarget[0] = target[0];
+				}
 				directory.setText(target[0].getAbsolutePath());
+				targetMode.setSelectedIndex(0);
 			}
 		});
-		install.addActionListener(event -> startInstallation(frame, versions, action, target[0], status, completion, install, statusBox));
+		install.addActionListener(event -> {
+			if (targetMode.getSelectedIndex() == 1 && profiles.getSelectedItem() == null) {
+				completion.setText("Profile required");
+				completion.setForeground(Color.RED);
+				status.append("Select an existing CurseForge or Modrinth profile first.\n");
+				return;
+			}
+			startInstallation(frame, versions, action, target[0], status, completion, install, statusBox);
+		});
 		loadVersions(versions, status);
 		return panel;
+	}
+
+	private static List<Path> customProfileRoots(String location) {
+		if (location == null || location.isBlank() || location.equals("Detecting...")) {
+			return List.of();
+		}
+		try {
+			Path root = Path.of(location.trim());
+			return java.nio.file.Files.isDirectory(root) ? List.of(root) : List.of();
+		} catch (RuntimeException exception) {
+			return List.of();
+		}
 	}
 
 	private static void loadVersions(JComboBox<String> versions, JTextArea status) {
@@ -278,7 +399,7 @@ public final class WrapperInstaller {
 	}
 
 	private static final class StatusBox extends JPanel {
-		enum State { SUCCESS, FAILURE, IN_PROGRESS }
+		enum State { IDLE, SUCCESS, FAILURE, IN_PROGRESS }
 
 		private final JLabel label = new JLabel("Ready");
 		private final JPanel indicator = new JPanel();
@@ -289,16 +410,18 @@ public final class WrapperInstaller {
 			indicator.setPreferredSize(new Dimension(16, 16));
 			add(indicator, constraints(0, 0, 1, 1, 0, 0, GridBagConstraints.NONE));
 			add(label, constraints(1, 0, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
-			setState(State.IN_PROGRESS);
+			setState(State.IDLE);
 		}
 
 		void setState(State state) {
 			Color color = switch (state) {
+				case IDLE -> Color.GRAY;
 				case SUCCESS -> Color.GREEN;
 				case FAILURE -> Color.RED;
 				case IN_PROGRESS -> Color.ORANGE;
 			};
 			label.setText(switch (state) {
+				case IDLE -> "Idle";
 				case SUCCESS -> "Success";
 				case FAILURE -> "Failure";
 				case IN_PROGRESS -> "In progress";
@@ -331,20 +454,25 @@ public final class WrapperInstaller {
 
         JButton browse = new JButton("Choose directory");
         JButton install = new JButton("Download and install");
+
         JLabel completion = new JLabel("Ready");
         completion.setForeground(new java.awt.Color(90, 90, 90));
+
         final File[] target = {new File(System.getProperty("user.dir"))};
         JTextField directory = new JTextField(target[0].getAbsolutePath());
         directory.setEditable(false);
         directory.setCaretPosition(0);
+
         JRadioButton customDirectory = new JRadioButton("Custom directory", true);
         JRadioButton launcherProfile = new JRadioButton("Launcher profile");
         ButtonGroup targetModes = new ButtonGroup();
         targetModes.add(customDirectory);
         targetModes.add(launcherProfile);
+
         JComboBox<String> profileType = new JComboBox<>(new String[] {"CurseForge", "Modrinth"});
         JComboBox<Path> profiles = new JComboBox<>();
         profiles.setEnabled(false);
+
         JButton chooseProfilesLocation = new JButton("Choose profiles location");
         JTextField profilesLocation = new JTextField();
         profilesLocation.setEditable(false);
@@ -373,8 +501,10 @@ public final class WrapperInstaller {
             profiles.setEnabled(false);
             directory.setText(target[0].getAbsolutePath());
         });
+
         launcherProfile.addActionListener(event -> refreshProfiles.run());
         profileType.addActionListener(event -> refreshProfiles.run());
+
         chooseProfilesLocation.addActionListener(event -> {
             JFileChooser chooser = new JFileChooser(profilesLocation.getText().isBlank()
                     ? target[0] : new File(profilesLocation.getText()));
@@ -385,6 +515,7 @@ public final class WrapperInstaller {
                 refreshProfiles.run();
             }
         });
+
         profiles.addActionListener(event -> {
             Path selected = (Path) profiles.getSelectedItem();
             if (selected != null && launcherProfile.isSelected()) {
@@ -410,17 +541,20 @@ public final class WrapperInstaller {
                 }
             }
         });
+
         install.addActionListener(event -> {
             String version = (String) versions.getSelectedItem();
             if (version == null || version.startsWith("Loading")) {
                 return;
             }
+
             if (launcherProfile.isSelected() && profiles.getSelectedItem() == null) {
                 status.setText("No " + profileType.getSelectedItem() + " profiles were found. Choose a profile directory first.\n");
                 completion.setText("Profile required");
                 completion.setForeground(java.awt.Color.RED);
                 return;
             }
+
             String action;
             if (client.isSelected()) {
                 action = "--installClient";
@@ -430,9 +564,11 @@ public final class WrapperInstaller {
                 action = "--fat-installer";
             }
             install.setEnabled(false);
+
             completion.setText("Installing...");
             completion.setForeground(new java.awt.Color(180, 110, 0));
             status.setText("Downloading official NeoForge " + version + " installer...\n");
+
             new SwingWorker<Integer, String>() {
                 @Override
                 protected Integer doInBackground() throws Exception {
@@ -454,6 +590,7 @@ public final class WrapperInstaller {
                 @Override
                 protected void done() {
                     install.setEnabled(true);
+
                     try {
                         int result = get();
                         if (result == 0) {
@@ -466,6 +603,7 @@ public final class WrapperInstaller {
                             completion.setText("Installation failed (exit code " + result + ")");
                             completion.setForeground(java.awt.Color.RED);
                         }
+
                     } catch (Exception exception) {
                         status.append("Installation failed: " + exception.getMessage() + "\n");
                         completion.setText("Installation failed");

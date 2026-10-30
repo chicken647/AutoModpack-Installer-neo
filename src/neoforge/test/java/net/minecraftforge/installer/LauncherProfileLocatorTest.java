@@ -37,4 +37,14 @@ class LauncherProfileLocatorTest {
         assertEquals(List.of(home.resolve("AppData/Roaming/ModrinthApp/profiles")),
                 LauncherProfileLocator.profileRoots(LauncherProfileLocator.Type.MODRINTH, home, "Windows 11"));
     }
+
+    @Test
+    void filtersDetectedProfileRootsToExistingDirectories() throws Exception {
+        Path home = Files.createTempDirectory("launcher-home");
+        Path modrinthRoot = home.resolve("AppData/Roaming/ModrinthApp/profiles");
+        Files.createDirectories(modrinthRoot);
+
+        assertEquals(List.of(modrinthRoot), LauncherProfileLocator.existingProfileRoots(
+                LauncherProfileLocator.Type.MODRINTH, home, "Windows 11"));
+    }
 }
