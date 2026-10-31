@@ -25,4 +25,10 @@ class WrapperInstallerTest {
         assertFalse(WrapperInstaller.shouldInstallNeoForge(true));
         assertTrue(WrapperInstaller.shouldInstallNeoForge(false));
     }
+
+    @Test
+    void namesAppearanceThemes() {
+        assertEquals("Light", WrapperInstaller.themeName(WrapperInstaller.Theme.LIGHT));
+        assertEquals("Dark", WrapperInstaller.themeName(WrapperInstaller.Theme.DARK));
+    }
 }
