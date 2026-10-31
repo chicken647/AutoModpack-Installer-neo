@@ -9,10 +9,15 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.swing.text.JTextComponent;
 import net.minecraftforge.installer.automodpack.Installation;
 
 public final class WrapperInstaller {
     private static final Logger LOGGER = Logger.getLogger(WrapperInstaller.class.getName());
+
+    enum Theme {
+        LIGHT, DARK
+    }
 
     private WrapperInstaller() {
     }
@@ -144,13 +149,191 @@ public final class WrapperInstaller {
 	}
 
 	private void createAndShowGUI(String label, Color color) {
+		applyThemeDefaults(Theme.LIGHT);
 		JFrame frame = new JFrame("NeoForge Installer");
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.setContentPane(createInstallerPanel(frame, label, color));
+		frame.setJMenuBar(createMenuBar(frame));
+		applyComponentTheme(frame, Theme.LIGHT);
 		frame.pack();
 		frame.setMinimumSize(new Dimension(640, 460));
 		frame.setLocationRelativeTo(null);
 		frame.setVisible(true);
+	}
+
+	private JMenuBar createMenuBar(JFrame frame) {
+		JMenuBar menuBar = new JMenuBar();
+		menuBar.setLayout(new FlowLayout(FlowLayout.LEFT, 0, 0));
+
+		JMenu fileMenu = new JMenu("File");
+		fileMenu.setMnemonic('F');
+		configureTopLevelMenu(fileMenu);
+		JMenuItem exit = new JMenuItem("Exit");
+		exit.setAccelerator(KeyStroke.getKeyStroke("ctrl Q"));
+		exit.addActionListener(event -> frame.dispose());
+		fileMenu.add(exit);
+
+		JMenu settingsMenu = new JMenu("Settings");
+		settingsMenu.setMnemonic('S');
+		configureTopLevelMenu(settingsMenu);
+		JMenu appearanceMenu = new JMenu("Appearance");
+		appearanceMenu.setHorizontalAlignment(SwingConstants.LEFT);
+		ButtonGroup themes = new ButtonGroup();
+		addThemeItem(appearanceMenu, themes, "Light", Theme.LIGHT, frame, true);
+		addThemeItem(appearanceMenu, themes, "Dark", Theme.DARK, frame, false);
+		settingsMenu.add(appearanceMenu);
+
+		JMenu helpMenu = new JMenu("Help");
+		configureTopLevelMenu(helpMenu);
+		JMenuItem about = new JMenuItem("About");
+		about.addActionListener(event -> JOptionPane.showMessageDialog(frame,
+				"AutoModpack Installer\nInstalls AutoModpack and NeoForge when needed.",
+				"About", JOptionPane.INFORMATION_MESSAGE));
+		helpMenu.add(about);
+
+		menuBar.add(fileMenu);
+		menuBar.add(settingsMenu);
+		menuBar.add(helpMenu);
+		return menuBar;
+	}
+
+	private void configureTopLevelMenu(JMenu menu) {
+		menu.setHorizontalAlignment(SwingConstants.CENTER);
+		menu.setMargin(new Insets(2, 12, 2, 12));
+	}
+
+	private void addThemeItem(JMenu menu, ButtonGroup themes, String label, Theme theme,
+			JFrame frame, boolean selected) {
+		JRadioButtonMenuItem item = new JRadioButtonMenuItem(label, selected);
+		item.addActionListener(event -> applyTheme(frame, theme));
+		themes.add(item);
+		menu.add(item);
+	}
+
+	static String themeName(Theme theme) {
+		return switch (theme) {
+			case LIGHT -> "Light";
+			case DARK -> "Dark";
+		};
+	}
+
+	private void applyTheme(JFrame frame, Theme theme) {
+		try {
+			applyThemeDefaults(theme);
+			SwingUtilities.updateComponentTreeUI(frame);
+			applyComponentTheme(frame, theme);
+			frame.pack();
+			frame.repaint();
+		} catch (Exception exception) {
+			LOGGER.log(Level.WARNING, "Failed to apply " + themeName(theme) + " theme", exception);
+		}
+	}
+
+	private static void applyComponentTheme(Component component, Theme theme) {
+		Color background = theme == Theme.LIGHT ? Color.WHITE : new Color(43, 43, 43);
+		Color foreground = theme == Theme.LIGHT ? Color.BLACK : new Color(235, 235, 235);
+		Color control = theme == Theme.LIGHT ? new Color(238, 238, 238) : new Color(65, 65, 65);
+		if (component instanceof StatusBox statusBox) {
+			statusBox.applyTheme(theme);
+			return;
+		} else if (component instanceof JMenuBar || component instanceof JMenu || component instanceof JMenuItem
+				|| component instanceof JPopupMenu) {
+			component.setBackground(background);
+			component.setForeground(foreground);
+		} else if (component instanceof JTextComponent) {
+			component.setBackground(control);
+			component.setForeground(foreground);
+		} else if (component instanceof JComboBox<?> || component instanceof AbstractButton) {
+			component.setBackground(control);
+			component.setForeground(foreground);
+		} else if (component instanceof JLabel || component instanceof JPanel
+				|| component instanceof JViewport || component instanceof JScrollPane) {
+			component.setBackground(background);
+			component.setForeground(foreground);
+		}
+		if (component instanceof Container container) {
+			for (Component child : container.getComponents()) {
+				applyComponentTheme(child, theme);
+			}
+		}
+	}
+
+	private static void applyThemeDefaults(Theme theme) {
+		try {
+			UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+		} catch (Exception exception) {
+			LOGGER.log(Level.WARNING, "Failed to set the cross-platform look and feel", exception);
+		}
+		if (theme == Theme.LIGHT) {
+			setLightDefaults();
+		} else {
+			setDarkDefaults();
+		}
+	}
+
+
+	private static void setLightDefaults() {
+		setThemeDefaults(Color.WHITE, Color.BLACK, new Color(238, 238, 238),
+				new Color(184, 207, 229), Color.BLACK);
+	}
+
+	private static void setDarkDefaults() {
+		setThemeDefaults(new Color(43, 43, 43), new Color(235, 235, 235), new Color(65, 65, 65),
+				new Color(90, 105, 120), Color.WHITE);
+	}
+
+	private static void setThemeDefaults(Color background, Color foreground, Color control,
+			Color selectionBackground, Color selectionForeground) {
+		UIManager.put("Panel.background", background);
+		UIManager.put("Panel.foreground", foreground);
+		UIManager.put("Label.foreground", foreground);
+		UIManager.put("MenuBar.background", background);
+		UIManager.put("MenuBar.foreground", foreground);
+		UIManager.put("Menu.background", background);
+		UIManager.put("Menu.foreground", foreground);
+		UIManager.put("MenuItem.background", background);
+		UIManager.put("MenuItem.foreground", foreground);
+		UIManager.put("MenuItem.selectionBackground", selectionBackground);
+		UIManager.put("MenuItem.selectionForeground", selectionForeground);
+		UIManager.put("RadioButtonMenuItem.background", background);
+		UIManager.put("RadioButtonMenuItem.foreground", foreground);
+		UIManager.put("RadioButtonMenuItem.selectionBackground", selectionBackground);
+		UIManager.put("RadioButtonMenuItem.selectionForeground", selectionForeground);
+		UIManager.put("TextField.background", control);
+		UIManager.put("TextField.foreground", foreground);
+		UIManager.put("TextArea.background", control);
+		UIManager.put("TextArea.foreground", foreground);
+		UIManager.put("TextArea.caretForeground", foreground);
+		UIManager.put("TextArea.selectionBackground", selectionBackground);
+		UIManager.put("TextArea.selectionForeground", selectionForeground);
+		UIManager.put("ComboBox.background", control);
+		UIManager.put("ComboBox.foreground", foreground);
+		UIManager.put("ComboBox.buttonBackground", control);
+		UIManager.put("ComboBox.buttonHighlight", control);
+		UIManager.put("ComboBox.buttonDarkShadow", control.darker());
+		UIManager.put("Button.background", control);
+		UIManager.put("Button.foreground", foreground);
+		UIManager.put("Button.select", selectionBackground);
+		UIManager.put("Button.focus", selectionBackground);
+		UIManager.put("ScrollPane.background", background);
+		UIManager.put("ScrollPane.foreground", foreground);
+		UIManager.put("Viewport.background", background);
+		UIManager.put("Separator.background", control);
+		UIManager.put("Separator.foreground", control);
+		UIManager.put("TitledBorder.titleColor", foreground);
+		UIManager.put("OptionPane.background", background);
+		UIManager.put("OptionPane.foreground", foreground);
+		UIManager.put("OptionPane.messageForeground", foreground);
+		UIManager.put("OptionPane.buttonBackground", control);
+		UIManager.put("OptionPane.buttonForeground", foreground);
+		UIManager.put("ComboBox.selectionBackground", selectionBackground);
+		UIManager.put("ComboBox.selectionForeground", selectionForeground);
+		UIManager.put("List.background", control);
+		UIManager.put("List.foreground", foreground);
+		UIManager.put("Table.background", control);
+		UIManager.put("Table.foreground", foreground);
+		UIManager.put("ToolTip.background", control);
+		UIManager.put("ToolTip.foreground", foreground);
 	}
 
 	private JPanel createInstallerPanel(JFrame frame, String initialLabel, Color initialColor) {
@@ -424,6 +607,7 @@ public final class WrapperInstaller {
 
 		private final JLabel label = new JLabel("Ready");
 		private final JPanel indicator = new JPanel();
+		private State state = State.IDLE;
 
 		StatusBox() {
 			setLayout(new GridBagLayout());
@@ -434,7 +618,23 @@ public final class WrapperInstaller {
 			setState(State.IDLE);
 		}
 
+		@Override
+		public void updateUI() {
+			super.updateUI();
+			setBorder(BorderFactory.createTitledBorder("Status"));
+			if (indicator != null) {
+				setState(state);
+			}
+		}
+
+		void applyTheme(Theme theme) {
+			Color foreground = theme == Theme.LIGHT ? Color.BLACK : new Color(235, 235, 235);
+			label.setForeground(foreground);
+			setBorder(BorderFactory.createTitledBorder("Status"));
+		}
+
 		void setState(State state) {
+			this.state = state;
 			Color color = switch (state) {
 				case IDLE -> Color.GRAY;
 				case SUCCESS -> Color.GREEN;
