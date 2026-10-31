@@ -8,6 +8,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.net.URLEncoder;
 
 final class ModrinthApi {
     private static final String PROJECT_ID = "k68glP2e";
@@ -16,7 +17,11 @@ final class ModrinthApi {
     private ModrinthApi() {}
 
     static String getLatestDownloadUrl(String gameVersion) throws IOException {
-        String endpoint = buildApiUrl(gameVersion);
+        return getLatestDownloadUrl("neoforge", gameVersion);
+    }
+
+    static String getLatestDownloadUrl(String loader, String gameVersion) throws IOException {
+        String endpoint = buildApiUrl(loader, gameVersion);
         HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
         connection.setRequestProperty("User-Agent", USER_AGENT);
         connection.setRequestMethod("GET");
@@ -34,8 +39,20 @@ final class ModrinthApi {
     }
 
     static String buildApiUrl(String gameVersion) {
+        return buildApiUrl("neoforge", gameVersion);
+    }
+
+    static String buildApiUrl(String loader, String gameVersion) {
         return "https://api.modrinth.com/v2/project/" + PROJECT_ID
-                + "/version?loaders=%5B%22neoforge%22%5D&game_versions=%5B%22"
-                + gameVersion.replace("\"", "") + "%22%5D";
+                + "/version?loaders=%5B%22" + encode(loader) + "%22%5D&game_versions=%5B%22"
+                + encode(gameVersion) + "%22%5D";
+    }
+
+    private static String encode(String value) {
+        try {
+            return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("Invalid Modrinth query value", exception);
+        }
     }
 }

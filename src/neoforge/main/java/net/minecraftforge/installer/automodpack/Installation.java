@@ -16,10 +16,15 @@ public final class Installation {
     }
 
     public static void installAutomodpack(String gameVersion, Path minecraftDirectory, Consumer<String> output) {
+        installAutomodpack(gameVersion, "neoforge", minecraftDirectory, output);
+    }
+
+    public static void installAutomodpack(String gameVersion, String loader, Path minecraftDirectory,
+            Consumer<String> output) {
         try {
-            String downloadUrl = ModrinthApi.getLatestDownloadUrl(gameVersion);
+            String downloadUrl = ModrinthApi.getLatestDownloadUrl(loader, gameVersion);
             if (downloadUrl == null) {
-                output.accept("AutoModpack is not available for Minecraft " + gameVersion);
+                output.accept("AutoModpack is not available for " + loader + " on Minecraft " + gameVersion);
                 return;
             }
 

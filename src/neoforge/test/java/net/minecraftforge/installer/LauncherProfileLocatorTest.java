@@ -1,6 +1,7 @@
 package net.minecraftforge.installer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -46,5 +47,33 @@ class LauncherProfileLocatorTest {
 
         assertEquals(List.of(modrinthRoot), LauncherProfileLocator.existingProfileRoots(
                 LauncherProfileLocator.Type.MODRINTH, home, "Windows 11"));
+    }
+
+    @Test
+    void readsModrinthProfileMetadata() throws Exception {
+        Path profile = Files.createTempDirectory("modrinth-profile");
+        Files.writeString(profile.resolve("profile.json"), ""
+                + "{\"game_version\":\"1.20.1\",\"loader\":\"fabric\"}");
+
+        assertEquals(new LauncherProfileLocator.ProfileInfo("1.20.1", "fabric"),
+                LauncherProfileLocator.readProfile(profile));
+    }
+
+    @Test
+    void readsCurseForgeProfileMetadata() throws Exception {
+        Path profile = Files.createTempDirectory("curseforge-profile");
+        Files.writeString(profile.resolve("minecraftinstance.json"), ""
+                + "{\"gameVersion\":\"1.21.1\",\"modLoader\":\"neoforge-21.1.80\"}");
+
+        assertEquals(new LauncherProfileLocator.ProfileInfo("1.21.1", "neoforge"),
+                LauncherProfileLocator.readProfile(profile));
+    }
+
+    @Test
+    void rejectsProfileWithoutLoaderMetadata() throws Exception {
+        Path profile = Files.createTempDirectory("incomplete-profile");
+        Files.writeString(profile.resolve("profile.json"), "{\"game_version\":\"1.20.1\"}");
+
+        assertNull(LauncherProfileLocator.readProfile(profile));
     }
 }
