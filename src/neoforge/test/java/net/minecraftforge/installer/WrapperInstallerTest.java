@@ -19,4 +19,10 @@ class WrapperInstallerTest {
         assertTrue(WrapperInstaller.installsGame("--installServer"));
         assertFalse(WrapperInstaller.installsGame("--fat-installer"));
     }
+
+    @Test
+    void skipsNeoForgeForExistingLauncherProfiles() {
+        assertFalse(WrapperInstaller.shouldInstallNeoForge(true));
+        assertTrue(WrapperInstaller.shouldInstallNeoForge(false));
+    }
 }

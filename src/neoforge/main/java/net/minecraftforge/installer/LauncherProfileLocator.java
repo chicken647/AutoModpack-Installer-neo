@@ -1,5 +1,9 @@
 package net.minecraftforge.installer;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.io.IOException;
+import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -7,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 
 final class LauncherProfileLocator {
+    record ProfileInfo(String gameVersion, String loader) {}
     enum Type {
         CURSEFORGE("CurseForge"),
         MODRINTH("Modrinth");
@@ -47,6 +52,40 @@ final class LauncherProfileLocator {
         } catch (java.io.IOException ignored) {
             return List.of();
         }
+    }
+
+    static ProfileInfo readProfile(Path profile) {
+        for (String fileName : List.of("profile.json", "minecraftinstance.json")) {
+            Path metadata = profile.resolve(fileName);
+            if (!Files.isRegularFile(metadata)) {
+                continue;
+            }
+            try (Reader reader = Files.newBufferedReader(metadata)) {
+                JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
+                String gameVersion = firstString(json, "game_version", "gameVersion", "minecraft_version",
+                        "minecraftVersion");
+                String loader = firstString(json, "loader", "mod_loader", "modLoader", "modLoaderType",
+                        "baseModLoader");
+                if (loader != null && loader.contains("-")) {
+                    loader = loader.substring(0, loader.indexOf('-'));
+                }
+                if (gameVersion != null && loader != null) {
+                    return new ProfileInfo(gameVersion, loader.toLowerCase());
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // Try the other supported launcher metadata format.
+            }
+        }
+        return null;
+    }
+
+    private static String firstString(JsonObject json, String... names) {
+        for (String name : names) {
+            if (json.has(name) && json.get(name).isJsonPrimitive()) {
+                return json.get(name).getAsString();
+            }
+        }
+        return null;
     }
 
     static List<Path> profileRoots(Type type, Path home, String osName) {

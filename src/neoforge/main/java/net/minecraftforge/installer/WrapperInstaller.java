@@ -90,6 +90,10 @@ public final class WrapperInstaller {
         return "--installClient".equals(action) || "--installServer".equals(action);
     }
 
+    static boolean shouldInstallNeoForge(boolean launcherProfile) {
+        return !launcherProfile;
+    }
+
     static String minecraftVersion(String neoForgeVersion) {
         int separator = neoForgeVersion.indexOf('-');
         String minecraftVersion = separator >= 0 ? neoForgeVersion.substring(0, separator) : neoForgeVersion;
@@ -175,9 +179,11 @@ public final class WrapperInstaller {
 		JButton browse = new JButton("Choose directory");
 		JButton install = new JButton("Download and install");
 
-		JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+		JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
 		toolbar.add(new JLabel("Install action:"));
+		toolbar.add(Box.createHorizontalStrut(6));
 		toolbar.add(action);
+		toolbar.add(Box.createHorizontalStrut(6));
 		toolbar.add(install);
 		panel.add(toolbar, constraints(0, 2, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
 		panel.add(new JLabel("NeoForge version:"), constraints(0, 3, 1, 1, 0, 0, GridBagConstraints.NONE));
@@ -190,7 +196,7 @@ public final class WrapperInstaller {
 		profilePanel.add(profileType, BorderLayout.WEST);
 		profilePanel.add(profiles, BorderLayout.CENTER);
 		panel.add(profilePanel, constraints(0, 7, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
-		JPanel profilesLocationPanel = new JPanel(new BorderLayout(6, 0));
+		JPanel profilesLocationPanel = new JPanel(new BorderLayout(6, 6));
 		JPanel profilesLocationDetails = new JPanel(new BorderLayout(6, 0));
 		profilesLocationDetails.add(new JLabel("Profile location:"), BorderLayout.WEST);
 		profilesLocationDetails.add(profilesLocation, BorderLayout.CENTER);
@@ -292,15 +298,16 @@ public final class WrapperInstaller {
 				targetMode.setSelectedIndex(0);
 			}
 		});
-		install.addActionListener(event -> {
-			if (targetMode.getSelectedIndex() == 1 && profiles.getSelectedItem() == null) {
+  install.addActionListener(event -> {
+            if (targetMode.getSelectedIndex() == 1 && profiles.getSelectedItem() == null) {
 				completion.setText("Profile required");
 				completion.setForeground(Color.RED);
 				status.append("Select an existing CurseForge or Modrinth profile first.\n");
 				return;
 			}
-			startInstallation(frame, versions, action, target[0], status, completion, install, statusBox);
-		});
+            startInstallation(frame, versions, action, target[0], targetMode.getSelectedIndex() == 1,
+                    status, completion, install, statusBox);
+        });
 		loadVersions(versions, status);
 		return panel;
 	}
@@ -340,12 +347,13 @@ public final class WrapperInstaller {
 		}.execute();
 	}
 
-	private static void startInstallation(JFrame frame, JComboBox<String> versions, JComboBox<String> action,
-			File target, JTextArea status, JLabel completion, JButton install, StatusBox statusBox) {
-		String version = (String) versions.getSelectedItem();
-		if (version == null || version.startsWith("Loading")) {
-			return;
-		}
+ private static void startInstallation(JFrame frame, JComboBox<String> versions, JComboBox<String> action,
+            File target, boolean launcherProfile, JTextArea status, JLabel completion, JButton install,
+            StatusBox statusBox) {
+        String version = (String) versions.getSelectedItem();
+        if (!launcherProfile && (version == null || version.startsWith("Loading"))) {
+            return;
+        }
 		String selectedAction = switch ((String) action.getSelectedItem()) {
 			case "Server" -> "--installServer";
 			case "Fat installer" -> "--fat-installer";
@@ -355,11 +363,24 @@ public final class WrapperInstaller {
 		completion.setText("Installing...");
 		completion.setForeground(new Color(180, 110, 0));
 		statusBox.setState(StatusBox.State.IN_PROGRESS);
-		status.setText("Downloading official NeoForge " + version + " installer...\n");
+  status.setText(launcherProfile
+          ? "Reading the selected profile and preparing AutoModpack...\n"
+          : "Downloading official NeoForge " + version + " installer...\n");
 		new SwingWorker<Integer, String>() {
-			@Override
-			protected Integer doInBackground() throws Exception {
-				File installerJar = OfficialInstallerLauncher.download(version);
+   @Override
+   protected Integer doInBackground() throws Exception {
+       if (!shouldInstallNeoForge(launcherProfile)) {
+           LauncherProfileLocator.ProfileInfo profile = LauncherProfileLocator.readProfile(target.toPath());
+           if (profile == null) {
+               throw new IllegalArgumentException("Selected profile has no supported game version and loader metadata");
+           }
+           publish("Existing " + profile.loader() + " profile detected for Minecraft "
+                   + profile.gameVersion() + ". Skipping NeoForge installation.\n");
+           Installation.installAutomodpack(profile.gameVersion(), profile.loader(), target.toPath(),
+                   line -> publish(line + "\n"));
+           return 0;
+       }
+       File installerJar = OfficialInstallerLauncher.download(version);
 				publish("Downloaded official installer: " + installerJar + "\nStarting installation...\n");
 				File destination = selectedAction.equals("--fat-installer")
 						? new File(target, "neoforge-" + version + "-fat.jar") : target;
