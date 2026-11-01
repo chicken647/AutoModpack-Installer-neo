@@ -77,6 +77,32 @@ class WrapperInstallerTest {
     }
 
     @Test
+    void providesDirectLauncherInstallerEndpoints() {
+        assertEquals("https://www.curseforge.com/download/app?clientType=standalone",
+                WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.CURSEFORGE));
+        assertTrue(WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.MODRINTH)
+                .startsWith("https://api.github.com/repos/modrinth/theseus/releases/latest"));
+        assertFalse(WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.CURSEFORGE)
+                .contains("overwolf"));
+        assertFalse(WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.MODRINTH)
+                .contains("modrinth.com/app"));
+    }
+
+    @Test
+    void identifiesInstallerSuffixesWithoutOpeningPages() {
+        assertEquals(".exe", WrapperInstaller.installerSuffix("application/octet-stream", "https://example.test/app.exe"));
+        assertEquals(".dmg", WrapperInstaller.installerSuffix("application/octet-stream", "https://example.test/app.dmg"));
+        assertEquals(".AppImage", WrapperInstaller.installerSuffix("application/octet-stream", "https://example.test/app.AppImage"));
+        assertEquals(".zip", WrapperInstaller.installerSuffix("application/zip", "https://example.test/app"));
+    }
+
+    @Test
+    void exposesModrinthReleaseApiInsteadOfWebsite() {
+        assertEquals("https://api.github.com/repos/modrinth/theseus/releases/latest",
+                WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.MODRINTH));
+    }
+
+    @Test
     void themesStatusBoxBackground() {
         WrapperInstaller.StatusBox statusBox = new WrapperInstaller.StatusBox();
 

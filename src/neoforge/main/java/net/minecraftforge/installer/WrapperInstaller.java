@@ -3,8 +3,15 @@ package net.minecraftforge.installer;
 import java.awt.*;
 import javax.swing.*;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.logging.Level;
@@ -23,6 +30,27 @@ public final class WrapperInstaller {
 
     enum Theme {
         LIGHT, DARK
+    }
+
+    enum LauncherApp {
+        CURSEFORGE("CurseForge", "https://www.curseforge.com/download/app?clientType=standalone"),
+        MODRINTH("Modrinth", "https://api.github.com/repos/modrinth/theseus/releases/latest");
+
+        private final String displayName;
+        private final String downloadUrl;
+
+        LauncherApp(String displayName, String downloadUrl) {
+            this.displayName = displayName;
+            this.downloadUrl = downloadUrl;
+        }
+8
+        String displayName() {
+            return displayName;
+        }
+
+        String downloadUrl() {
+            return downloadUrl;
+        }
     }
 
     private WrapperInstaller() {
@@ -233,6 +261,116 @@ public final class WrapperInstaller {
 			case LIGHT -> "Light";
 			case DARK -> "Dark";
 		};
+	}
+
+	static String launcherAppUrl(LauncherApp app) {
+		return app.downloadUrl();
+	}
+
+	private void installLauncherApp(JFrame frame, LauncherApp app,
+			JTextArea status, JLabel completion) {
+		status.append("Downloading the official standalone " + app.displayName() + " installer...\n");
+		completion.setText("Downloading " + app.displayName() + " installer");
+		new SwingWorker<Path, String>() {
+			@Override
+			protected Path doInBackground() throws Exception {
+				return downloadLauncherInstaller(app, this::publish);
+			}
+
+			@Override
+			protected void process(List<String> messages) {
+				messages.forEach(message -> status.append(message + "\n"));
+			}
+
+			@Override
+			protected void done() {
+				try {
+					Path installer = get();
+					launchInstaller(installer);
+					status.append("Installer started: " + installer + "\n");
+					completion.setText(app.displayName() + " installer started");
+					completion.setForeground(new Color(0, 128, 0));
+				} catch (Exception exception) {
+					Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+					String message = cause.getMessage() == null || cause.getMessage().isBlank()
+							? cause.toString() : cause.getMessage();
+					status.append("Could not install " + app.displayName() + ": " + message + "\n");
+					completion.setText(app.displayName() + " installation failed");
+					completion.setForeground(Color.RED);
+					JOptionPane.showMessageDialog(frame, message,
+							app.displayName() + " installation", JOptionPane.ERROR_MESSAGE);
+				}
+			}
+		}.execute();
+	}
+
+	static Path downloadLauncherInstaller(LauncherApp app, Consumer<String> output) throws IOException {
+		String downloadUrl = app == LauncherApp.MODRINTH
+				? resolveModrinthDownloadUrl() : app.downloadUrl();
+		URL url = new URL(downloadUrl);
+		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+		connection.setRequestProperty("User-Agent", "AutoModpack-Installer");
+		connection.setInstanceFollowRedirects(true);
+		if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) {
+			throw new IOException("Installer download returned HTTP " + connection.getResponseCode());
+		}
+		String contentType = connection.getContentType();
+		if (contentType != null && contentType.toLowerCase(Locale.ROOT).startsWith("text/html")) {
+			throw new IOException("The official launcher endpoint returned a webpage instead of an installer");
+		}
+		String suffix = installerSuffix(connection.getContentType(), downloadUrl);
+		Path target = Files.createTempFile("automodpack-" + app.displayName().toLowerCase(Locale.ROOT) + "-", suffix);
+		try (InputStream input = connection.getInputStream()) {
+			Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
+		} finally {
+			connection.disconnect();
+		}
+		if (Files.size(target) == 0) {
+			Files.deleteIfExists(target);
+			throw new IOException("The downloaded installer was empty");
+		}
+		output.accept("Downloaded installer to " + target);
+		return target;
+	}
+
+	private static String resolveModrinthDownloadUrl() throws IOException {
+		HttpURLConnection connection = (HttpURLConnection) new URL(LauncherApp.MODRINTH.downloadUrl()).openConnection();
+		connection.setRequestProperty("Accept", "application/vnd.github+json");
+		connection.setRequestProperty("User-Agent", "AutoModpack-Installer");
+		if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) {
+			throw new IOException("Modrinth release lookup returned HTTP " + connection.getResponseCode());
+		}
+		try (InputStream input = connection.getInputStream()) {
+			String json = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+			String preferred = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")
+					? "\\.exe" : System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac") ? "\\.dmg" : "\\.AppImage";
+			java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\\"browser_download_url\\\"\\s*:\\s*\\\"([^\\\"]+" + preferred + ")\\\"").matcher(json);
+			if (matcher.find()) {
+				return matcher.group(1).replace("\\u0026", "&");
+			}
+			throw new IOException("No compatible Modrinth installer was found in the latest release");
+		} finally {
+			connection.disconnect();
+		}
+	}
+
+	static String installerSuffix(String contentType, String url) {
+		String lower = url.toLowerCase(Locale.ROOT);
+		if (lower.contains(".dmg")) return ".dmg";
+		if (lower.contains(".appimage")) return ".AppImage";
+		if (lower.contains(".deb")) return ".deb";
+		if (lower.contains(".rpm")) return ".rpm";
+		return contentType != null && contentType.toLowerCase(Locale.ROOT).contains("zip") ? ".zip" : ".exe";
+	}
+
+	private static void launchInstaller(Path installer) throws IOException {
+		if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+			new ProcessBuilder(installer.toString()).start();
+		} else if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+			Desktop.getDesktop().open(installer.toFile());
+		} else {
+			throw new IOException("This computer cannot start the downloaded installer automatically");
+		}
 	}
 
 	private void applyTheme(JFrame frame, Theme theme) {
@@ -703,6 +841,15 @@ public final class WrapperInstaller {
         javaPanel.add(installJava, BorderLayout.EAST);
         panel.add(javaPanel, constraints(0, 3, 1, 0, GridBagConstraints.HORIZONTAL));
 
+		JPanel launcherAppsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+		launcherAppsPanel.setBorder(BorderFactory.createTitledBorder("Launcher apps"));
+		launcherAppsPanel.add(new JLabel("Install a launcher app:"));
+		JButton installCurseForge = new JButton("Install CurseForge app");
+		JButton installModrinth = new JButton("Install Modrinth app");
+		launcherAppsPanel.add(installCurseForge);
+		launcherAppsPanel.add(installModrinth);
+		panel.add(launcherAppsPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
+
 		JPanel destinationPanel = new JPanel(new GridBagLayout());
 		destinationPanel.setBorder(BorderFactory.createTitledBorder("Destination"));
 		destinationPanel.add(new JLabel("Install destination:"), constraints(0, 0, 0, 0, GridBagConstraints.NONE));
@@ -728,7 +875,7 @@ public final class WrapperInstaller {
 		directoryPanel.add(directory, BorderLayout.CENTER);
 		directoryPanel.add(browse, BorderLayout.EAST);
 		destinationPanel.add(directoryPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(destinationPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(destinationPanel, constraints(0, 5, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel activityPanel = new JPanel(new BorderLayout(0, 6));
 		activityPanel.setBorder(BorderFactory.createTitledBorder("Activity"));
@@ -737,7 +884,7 @@ public final class WrapperInstaller {
 		StatusBox statusBox = new StatusBox();
 		activityPanel.add(statusBox, BorderLayout.SOUTH);
 		activityPanel.add(completion, BorderLayout.NORTH);
-		panel.add(activityPanel, constraints(0, 5, 1, 1, GridBagConstraints.BOTH));
+		panel.add(activityPanel, constraints(0, 6, 1, 1, GridBagConstraints.BOTH));
 		profilePanel.setVisible(false);
 		profilesLocationPanel.setVisible(false);
 
@@ -812,6 +959,10 @@ public final class WrapperInstaller {
 				refreshProfiles.run();
 			}
 		});
+		installCurseForge.addActionListener(event ->
+				installLauncherApp(frame, LauncherApp.CURSEFORGE, status, completion));
+		installModrinth.addActionListener(event ->
+				installLauncherApp(frame, LauncherApp.MODRINTH, status, completion));
 		browse.addActionListener(event -> {
 			JFileChooser chooser = new JFileChooser(target[0]);
 			chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
@@ -1025,6 +1176,7 @@ public final class WrapperInstaller {
 			setLayout(new GridBagLayout());
 			setBorder(BorderFactory.createTitledBorder("Status"));
 			indicator.setPreferredSize(new Dimension(16, 16));
+			label.setFont(label.getFont().deriveFont(Font.PLAIN));
 			add(indicator, constraints(0, 0, 0, 0, GridBagConstraints.NONE));
 			add(label, constraints(1, 0, 1, 0, GridBagConstraints.HORIZONTAL));
 			setState(State.IDLE);
