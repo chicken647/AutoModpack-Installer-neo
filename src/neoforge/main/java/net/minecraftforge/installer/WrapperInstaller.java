@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.Serial;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -150,7 +151,7 @@ public final class WrapperInstaller {
 
 	private void createAndShowGUI(String label, Color color) {
 		applyThemeDefaults(Theme.LIGHT);
-		JFrame frame = new JFrame("NeoForge Installer");
+		JFrame frame = new JFrame("Installer");
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.setContentPane(createInstallerPanel(frame, label, color));
 		frame.setJMenuBar(createMenuBar(frame));
@@ -372,13 +373,16 @@ public final class WrapperInstaller {
 		panel.add(new JLabel("NeoForge version:"), constraints(0, 3, 1, 1, 0, 0, GridBagConstraints.NONE));
 		panel.add(versions, constraints(0, 4, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
 		panel.add(new JLabel("Install destination:"), constraints(0, 5, 1, 1, 0, 0, GridBagConstraints.NONE));
+
 		JPanel targetModePanel = new JPanel(new BorderLayout(6, 0));
 		targetModePanel.add(targetMode, BorderLayout.WEST);
 		panel.add(targetModePanel, constraints(0, 6, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+
 		JPanel profilePanel = new JPanel(new BorderLayout(6, 0));
 		profilePanel.add(profileType, BorderLayout.WEST);
 		profilePanel.add(profiles, BorderLayout.CENTER);
 		panel.add(profilePanel, constraints(0, 7, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+
 		JPanel profilesLocationPanel = new JPanel(new BorderLayout(6, 6));
 		JPanel profilesLocationDetails = new JPanel(new BorderLayout(6, 0));
 		profilesLocationDetails.add(new JLabel("Profile location:"), BorderLayout.WEST);
@@ -387,11 +391,14 @@ public final class WrapperInstaller {
 		profilesLocationPanel.add(profilesLocationDetails, BorderLayout.CENTER);
 		profilesLocationPanel.add(chooseProfilesLocation, BorderLayout.EAST);
 		panel.add(profilesLocationPanel, constraints(0, 8, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+
 		JPanel directoryPanel = new JPanel(new BorderLayout(6, 0));
 		directoryPanel.add(directory, BorderLayout.CENTER);
 		directoryPanel.add(browse, BorderLayout.EAST);
 		panel.add(directoryPanel, constraints(0, 9, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+
 		panel.add(new JScrollPane(status), constraints(0, 10, 1, 1, 1, 1, GridBagConstraints.BOTH));
+
 		StatusBox statusBox = new StatusBox();
 		panel.add(statusBox, constraints(0, 11, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
 		panel.add(completion, constraints(0, 12, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
@@ -537,7 +544,7 @@ public final class WrapperInstaller {
         if (!launcherProfile && (version == null || version.startsWith("Loading"))) {
             return;
         }
-		String selectedAction = switch ((String) action.getSelectedItem()) {
+		String selectedAction = switch ((String) Objects.requireNonNull(action.getSelectedItem())) {
 			case "Server" -> "--installServer";
 			case "Fat installer" -> "--fat-installer";
 			default -> "--installClient";
@@ -602,7 +609,7 @@ public final class WrapperInstaller {
 		}.execute();
 	}
 
-	private static final class StatusBox extends JPanel {
+	static final class StatusBox extends JPanel {
 		enum State { IDLE, SUCCESS, FAILURE, IN_PROGRESS }
 
 		private final JLabel label = new JLabel("Ready");
@@ -628,7 +635,10 @@ public final class WrapperInstaller {
 		}
 
 		void applyTheme(Theme theme) {
+			Color background = theme == Theme.LIGHT ? Color.WHITE : new Color(43, 43, 43);
 			Color foreground = theme == Theme.LIGHT ? Color.BLACK : new Color(235, 235, 235);
+			setBackground(background);
+			setForeground(foreground);
 			label.setForeground(foreground);
 			setBorder(BorderFactory.createTitledBorder("Status"));
 		}

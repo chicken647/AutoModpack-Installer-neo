@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import java.awt.Color;
+
 class WrapperInstallerTest {
     @Test
     void mapsNeoForgeVersionToMinecraftVersion() {
@@ -30,5 +32,16 @@ class WrapperInstallerTest {
     void namesAppearanceThemes() {
         assertEquals("Light", WrapperInstaller.themeName(WrapperInstaller.Theme.LIGHT));
         assertEquals("Dark", WrapperInstaller.themeName(WrapperInstaller.Theme.DARK));
+    }
+
+    @Test
+    void themesStatusBoxBackground() {
+        WrapperInstaller.StatusBox statusBox = new WrapperInstaller.StatusBox();
+
+        statusBox.applyTheme(WrapperInstaller.Theme.DARK);
+        assertEquals(new Color(43, 43, 43), statusBox.getBackground());
+
+        statusBox.applyTheme(WrapperInstaller.Theme.LIGHT);
+        assertEquals(Color.WHITE, statusBox.getBackground());
     }
 }
