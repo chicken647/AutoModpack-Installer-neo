@@ -7,6 +7,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -56,7 +57,13 @@ final class OfficialInstallerLauncher {
     }
 
     static int run(File installer, String action, File target, Consumer<String> output) throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder(javaExecutable(), "-jar", installer.getAbsolutePath(), action, target.getAbsolutePath());
+        return run(installer, action, target, Path.of(javaExecutable()), output);
+    }
+
+    static int run(File installer, String action, File target, Path java, Consumer<String> output)
+            throws IOException, InterruptedException {
+        ProcessBuilder builder = new ProcessBuilder(java.toAbsolutePath().toString(), "-jar", installer.getAbsolutePath(),
+                action, target.getAbsolutePath());
         if (output == null) {
             builder.inheritIO();
         } else {

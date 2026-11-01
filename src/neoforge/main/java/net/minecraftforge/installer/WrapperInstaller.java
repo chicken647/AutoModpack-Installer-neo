@@ -3,18 +3,23 @@ package net.minecraftforge.installer;
 import java.awt.*;
 import javax.swing.*;
 import java.io.File;
-import java.io.Serial;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.concurrent.ExecutionException;
+import java.awt.event.MouseAdapter;
 import javax.swing.text.JTextComponent;
+import javax.swing.plaf.basic.BasicComboBoxUI;
+import javax.swing.border.LineBorder;
 import net.minecraftforge.installer.automodpack.Installation;
 
 public final class WrapperInstaller {
     private static final Logger LOGGER = Logger.getLogger(WrapperInstaller.class.getName());
+    private static final int HOVER_ANIMATION_DURATION = 180;
+    private static final int HOVER_ANIMATION_INTERVAL = 15;
 
     enum Theme {
         LIGHT, DARK
@@ -34,7 +39,7 @@ public final class WrapperInstaller {
   if (args.length > 0) {
             runCommandLine(args);
         } else {
-            SwingUtilities.invokeLater(() -> new WrapperInstaller().createAndShowGUI("Ready", Color.GRAY));
+            SwingUtilities.invokeLater(() -> new WrapperInstaller().createAndShowGUI());
         }
     }
 
@@ -60,15 +65,18 @@ public final class WrapperInstaller {
     }
 
     private static String validateAction(String action) {
-        if ("--installClient".equals(action) || "--installServer".equals(action) || "--fat-installer".equals(action)) {
-            return action;
-        }
-        throw new IllegalArgumentException("Unsupported installer action");
+        return switch (action) {
+            case "--installClient" -> "--installClient";
+            case "--installServer" -> "--installServer";
+            case "--fat-installer" -> "--fat-installer";
+            default -> throw new IllegalArgumentException("Unsupported installer action");
+        };
     }
 
     private static String validateVersion(String version) {
-        NeoForgeVersionApi.installerUrl(version);
-        return version;
+        String installerUrl = NeoForgeVersionApi.installerUrl(version);
+        String fileName = installerUrl.substring(installerUrl.lastIndexOf('/') + 1);
+        return fileName.substring("neoforge-".length(), fileName.length() - "-installer.jar".length());
     }
 
     private static File validateTarget(String target) {
@@ -84,25 +92,53 @@ public final class WrapperInstaller {
     }
 
     private static int runInstallation(File installer, String action, String neoForgeVersion, File target, Consumer<String> output) throws java.io.IOException, InterruptedException {
-        int exitCode = OfficialInstallerLauncher.run(installer, action, target, output);
-        if (exitCode == 0 && installsGame(action)) {
+        return runInstallation(installer, action, neoForgeVersion, target, null, output);
+    }
+
+    private static int runInstallation(File installer, String action, String neoForgeVersion, File target,
+            Path javaExecutable, Consumer<String> output) throws java.io.IOException, InterruptedException {
+        String safeAction = validateAction(action);
+        String safeVersion = validateVersion(neoForgeVersion);
+        File safeTarget = validateTarget(target.getPath());
+        int exitCode = javaExecutable == null
+                ? OfficialInstallerLauncher.run(installer, safeAction, safeTarget, output)
+                : OfficialInstallerLauncher.run(installer, safeAction, safeTarget, javaExecutable, output);
+        if (exitCode == 0 && installsGame(safeAction)) {
             output.accept("NeoForge installation finished. Checking for AutoModpack... ");
-            Installation.installAutomodpack(minecraftVersion(neoForgeVersion), target.toPath(), output);
+            Installation.installAutomodpack(minecraftVersion(safeVersion), safeTarget.toPath(), output);
         }
         return exitCode;
     }
 
-    static boolean installsGame(String action) {
-        return "--installClient".equals(action) || "--installServer".equals(action);
-    }
+   	static boolean installsGame(String action) {
+		return "--installClient".equals(action) || "--installServer".equals(action);
+	}
+
+	static boolean hasMinecraftLauncherProfile(File target) {
+		return target.isDirectory()
+				&& (new File(target, "launcher_profiles.json").isFile()
+				|| new File(target, "launcher_profiles_microsoft_store.json").isFile());
+	}
+
+	static String clientInstallPreflightError(File target) {
+		if (!target.isDirectory()) {
+			return "There is no minecraft installation at: " + target;
+		}
+		if (!hasMinecraftLauncherProfile(target)) {
+			return "There is no minecraft launcher profile in \"" + target
+					+ "\", you need to run the launcher first!";
+		}
+		return null;
+	}
 
     static boolean shouldInstallNeoForge(boolean launcherProfile) {
         return !launcherProfile;
     }
 
     static String minecraftVersion(String neoForgeVersion) {
-        int separator = neoForgeVersion.indexOf('-');
-        String minecraftVersion = separator >= 0 ? neoForgeVersion.substring(0, separator) : neoForgeVersion;
+        String safeVersion = validateVersion(neoForgeVersion);
+        int separator = safeVersion.indexOf('-');
+        String minecraftVersion = separator >= 0 ? safeVersion.substring(0, separator) : safeVersion;
         String[] parts = minecraftVersion.split("\\.");
         if (separator >= 0 || parts.length <= 2) {
             return minecraftVersion;
@@ -113,16 +149,13 @@ public final class WrapperInstaller {
 	public static void addComponentsToPane(Container pane) {
 		pane.setLayout(new GridBagLayout());
 		pane.add(new JLabel("Use the controls below to select a version and destination."),
-				constraints(0, 0, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+				constraints(0, 0, 1, 0, GridBagConstraints.HORIZONTAL));
 	}
 
-	private static GridBagConstraints constraints(int x, int y, int width, int height,
-			double weightX, double weightY, int fill) {
+	private static GridBagConstraints constraints(int x, int y, double weightX, double weightY, int fill) {
 		GridBagConstraints constraints = new GridBagConstraints();
 		constraints.gridx = x;
 		constraints.gridy = y;
-		constraints.gridwidth = width;
-		constraints.gridheight = height;
 		constraints.weightx = weightX;
 		constraints.weighty = weightY;
 		constraints.fill = fill;
@@ -131,31 +164,13 @@ public final class WrapperInstaller {
 		return constraints;
 	}
 
-	private JPanel createStatusIndicator(Color color) {
-		return new JPanel() {
-			@Serial private static final long serialVersionUID = 1L;
-
-			@Override
-			public Dimension getPreferredSize() {
-				return new Dimension(16, 16);
-			}
-
-			@Override
-			protected void paintComponent(Graphics g) {
-				super.paintComponent(g);
-				g.setColor(color);
-				g.fillOval(0, 0, getWidth(), getHeight());
-			}
-		};
-	}
-
-	private void createAndShowGUI(String label, Color color) {
+	private void createAndShowGUI() {
 		applyThemeDefaults(Theme.LIGHT);
 		JFrame frame = new JFrame("Installer");
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		frame.setContentPane(createInstallerPanel(frame, label, color));
+		frame.setContentPane(createInstallerPanel(frame));
 		frame.setJMenuBar(createMenuBar(frame));
-		applyComponentTheme(frame, Theme.LIGHT);
+		applyComponentThemeRecursively(frame, Theme.LIGHT);
 		frame.pack();
 		frame.setMinimumSize(new Dimension(640, 460));
 		frame.setLocationRelativeTo(null);
@@ -222,7 +237,7 @@ public final class WrapperInstaller {
 		try {
 			applyThemeDefaults(theme);
 			SwingUtilities.updateComponentTreeUI(frame);
-			applyComponentTheme(frame, theme);
+			applyComponentThemeRecursively(frame, theme);
 			frame.pack();
 			frame.repaint();
 		} catch (Exception exception) {
@@ -230,7 +245,12 @@ public final class WrapperInstaller {
 		}
 	}
 
-	private static void applyComponentTheme(Component component, Theme theme) {
+	static void applyComponentTheme(Component component, Theme theme) {
+		applyThemeDefaults(theme);
+		applyComponentThemeRecursively(component, theme);
+	}
+
+	private static void applyComponentThemeRecursively(Component component, Theme theme) {
 		Color background = theme == Theme.LIGHT ? Color.WHITE : new Color(43, 43, 43);
 		Color foreground = theme == Theme.LIGHT ? Color.BLACK : new Color(235, 235, 235);
 		Color control = theme == Theme.LIGHT ? new Color(238, 238, 238) : new Color(65, 65, 65);
@@ -252,10 +272,233 @@ public final class WrapperInstaller {
 			component.setBackground(background);
 			component.setForeground(foreground);
 		}
+		if (component instanceof JComboBox<?> comboBox) {
+			comboBox.setUI(new FlatComboBoxUI());
+			comboBox.setBorder(BorderFactory.createCompoundBorder(
+					new FocusAwareComboBoxBorder(theme, comboBox),
+					BorderFactory.createEmptyBorder(4, 8, 4, 8)));
+			installComboHoverFeedback(comboBox, control, UIManager.getColor("ComboBox.selectionBackground"));
+		} else if (component instanceof JButton button) {
+			button.setRolloverEnabled(true);
+			button.setBorder(flatControlBorder(theme));
+			installHoverFeedback(button, control, UIManager.getColor("Button.select"));
+		} else if (component instanceof JTextField || component instanceof JScrollPane) {
+			((JComponent) component).setBorder(flatControlBorder(theme));
+		}
 		if (component instanceof Container container) {
 			for (Component child : container.getComponents()) {
-				applyComponentTheme(child, theme);
+				applyComponentThemeRecursively(child, theme);
 			}
+		}
+		if (component instanceof JComboBox<?> comboBox) {
+			for (Component child : comboBox.getComponents()) {
+				if (child instanceof AbstractButton button) {
+					button.setBorder(BorderFactory.createEmptyBorder());
+					installHoverFeedback(button, comboBox, UIManager.getColor("ComboBox.selectionBackground"));
+				}
+			}
+		}
+	}
+
+	private static void installHoverFeedback(JComponent component, Color normal, Color hover) {
+		if (hover == null) {
+			return;
+		}
+		Object previous = component.getClientProperty("WrapperInstaller.hoverListener");
+		if (previous instanceof java.awt.event.MouseListener listener) {
+			component.removeMouseListener(listener);
+		}
+		java.awt.event.MouseListener listener = new java.awt.event.MouseAdapter() {
+			@Override
+			public void mouseEntered(java.awt.event.MouseEvent event) {
+				animateHoverColor(component, normal, hover);
+			}
+
+			@Override
+			public void mouseExited(java.awt.event.MouseEvent event) {
+				animateHoverColor(component, hover, normal);
+			}
+		};
+		component.putClientProperty("WrapperInstaller.hoverListener", listener);
+		component.addMouseListener(listener);
+	}
+
+	private static void animateHoverColor(JComponent component, Color start, Color target) {
+		Object previous = component.getClientProperty("WrapperInstaller.hoverTimer");
+		if (previous instanceof Timer timer) {
+			timer.stop();
+		}
+		component.putClientProperty("WrapperInstaller.hoverTarget", target);
+		Color current = component.getBackground();
+		if (current == null) {
+			current = start;
+		}
+		Color initial = current;
+		long started = System.currentTimeMillis();
+		Color initialColor = initial;
+		Timer timer = new Timer(HOVER_ANIMATION_INTERVAL, event -> {
+			float progress = Math.min(1f,
+					(System.currentTimeMillis() - started) / (float) HOVER_ANIMATION_DURATION);
+			component.setBackground(interpolateColor(initialColor, target, progress));
+			component.repaint();
+			if (progress >= 1f) {
+				((Timer) event.getSource()).stop();
+				component.putClientProperty("WrapperInstaller.hoverTimer", null);
+			}
+		});
+		component.putClientProperty("WrapperInstaller.hoverTimer", timer);
+		timer.start();
+	}
+
+	static Color interpolateColor(Color start, Color end, float progress) {
+		float clamped = Math.max(0f, Math.min(1f, progress));
+		return new Color(
+				Math.round(start.getRed() + (end.getRed() - start.getRed()) * clamped),
+				Math.round(start.getGreen() + (end.getGreen() - start.getGreen()) * clamped),
+				Math.round(start.getBlue() + (end.getBlue() - start.getBlue()) * clamped));
+	}
+
+	private static void installComboHoverFeedback(JComboBox<?> comboBox, Color normal, Color hover) {
+		if (hover == null) {
+			return;
+		}
+		Object previous = comboBox.getClientProperty("WrapperInstaller.comboHoverListener");
+		if (previous instanceof java.awt.event.MouseListener listener) {
+			comboBox.removeMouseListener(listener);
+		}
+		java.awt.event.MouseListener listener = new java.awt.event.MouseAdapter() {
+			@Override
+			public void mouseEntered(java.awt.event.MouseEvent event) {
+				comboBox.putClientProperty("WrapperInstaller.comboHovered", true);
+				animateComboHoverColor(comboBox, normal, hover);
+				comboBox.repaint();
+			}
+
+			@Override
+			public void mouseExited(java.awt.event.MouseEvent event) {
+				comboBox.putClientProperty("WrapperInstaller.comboHovered", false);
+				animateComboHoverColor(comboBox, hover, normal);
+				comboBox.repaint();
+			}
+		};
+		comboBox.putClientProperty("WrapperInstaller.comboHoverListener", listener);
+		comboBox.addMouseListener(listener);
+	}
+
+	private static void installHoverFeedback(JComponent child, JComboBox<?> comboBox, Color hover) {
+		if (hover == null) {
+			return;
+		}
+		Object previous = child.getClientProperty("WrapperInstaller.comboHoverListener");
+		if (previous instanceof java.awt.event.MouseListener listener) {
+			child.removeMouseListener(listener);
+		}
+		java.awt.event.MouseListener listener = new java.awt.event.MouseAdapter() {
+			@Override
+			public void mouseEntered(java.awt.event.MouseEvent event) {
+				comboBox.putClientProperty("WrapperInstaller.comboHovered", true);
+				animateComboHoverColor(comboBox, comboBox.getBackground(), hover);
+				comboBox.repaint();
+			}
+
+			@Override
+			public void mouseExited(java.awt.event.MouseEvent event) {
+				comboBox.putClientProperty("WrapperInstaller.comboHovered", false);
+				animateComboHoverColor(comboBox, hover, comboBox.getBackground());
+				comboBox.repaint();
+			}
+		};
+		child.putClientProperty("WrapperInstaller.comboHoverListener", listener);
+		child.addMouseListener(listener);
+	}
+
+	private static void animateComboHoverColor(JComboBox<?> comboBox, Color start, Color target) {
+		Object previous = comboBox.getClientProperty("WrapperInstaller.comboHoverTimer");
+		if (previous instanceof Timer timer) {
+			timer.stop();
+		}
+		Color initial = (Color) comboBox.getClientProperty("WrapperInstaller.comboHoverColor");
+		if (initial == null) {
+			initial = start;
+		}
+		Color initialColor = initial;
+		long started = System.currentTimeMillis();
+		Timer timer = new Timer(HOVER_ANIMATION_INTERVAL, event -> {
+			float progress = Math.min(1f,
+					(System.currentTimeMillis() - started) / (float) HOVER_ANIMATION_DURATION);
+			comboBox.putClientProperty("WrapperInstaller.comboHoverColor",
+					interpolateColor(initialColor, target, progress));
+			comboBox.repaint();
+			if (progress >= 1f) {
+				((Timer) event.getSource()).stop();
+				comboBox.putClientProperty("WrapperInstaller.comboHoverTimer", null);
+			}
+		});
+		comboBox.putClientProperty("WrapperInstaller.comboHoverTimer", timer);
+		timer.start();
+	}
+
+	static javax.swing.border.Border flatControlBorder(Theme theme) {
+		Color borderColor = theme == Theme.LIGHT ? new Color(170, 170, 170) : new Color(105, 105, 105);
+		return BorderFactory.createCompoundBorder(
+				BorderFactory.createLineBorder(borderColor),
+				BorderFactory.createEmptyBorder(4, 8, 4, 8));
+	}
+
+	private static final class FocusAwareComboBoxBorder extends LineBorder {
+		private final JComboBox<?> comboBox;
+
+		private FocusAwareComboBoxBorder(Theme theme, JComboBox<?> comboBox) {
+			super(theme == Theme.LIGHT ? new Color(170, 170, 170) : new Color(105, 105, 105));
+			this.comboBox = comboBox;
+		}
+
+		@Override
+		public void paintBorder(Component component, Graphics graphics, int x, int y, int width, int height) {
+			Color selectionBackground = UIManager.getColor("ComboBox.selectionBackground");
+			if (comboBox.hasFocus() && selectionBackground != null) {
+				graphics.setColor(selectionBackground);
+				graphics.drawRect(x, y, width - 1, height - 1);
+			} else {
+				super.paintBorder(component, graphics, x, y, width, height);
+			}
+		}
+	}
+
+	private static final class FlatComboBoxUI extends BasicComboBoxUI {
+		@Override
+		protected ListCellRenderer<Object> createRenderer() {
+			return new DefaultListCellRenderer() {
+				@Override
+				public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+						boolean selected, boolean cellHasFocus) {
+					Component renderer = super.getListCellRendererComponent(list, value, index, selected, cellHasFocus);
+					setOpaque(index >= 0);
+					setBorder(BorderFactory.createEmptyBorder());
+					return renderer;
+				}
+			};
+		}
+
+		@Override
+		protected JButton createArrowButton() {
+			JButton button = new JButton();
+			button.setBorder(BorderFactory.createEmptyBorder());
+			button.setContentAreaFilled(false);
+			return button;
+		}
+
+		@Override
+		public void paintCurrentValueBackground(Graphics graphics, Rectangle bounds, boolean hasFocus) {
+			Color selectionBackground = UIManager.getColor("ComboBox.selectionBackground");
+			boolean hovered = Boolean.TRUE.equals(comboBox.getClientProperty("WrapperInstaller.comboHovered"));
+			Color hoverColor = (Color) comboBox.getClientProperty("WrapperInstaller.comboHoverColor");
+			Color background = hasFocus && selectionBackground != null ? selectionBackground
+					: hovered && hoverColor != null ? hoverColor : comboBox.getBackground();
+			graphics.setColor(background);
+			int width = Math.max(bounds.width, comboBox.getWidth());
+			int height = Math.max(bounds.height, comboBox.getHeight());
+			graphics.fillRect(0, 0, width, height);
 		}
 	}
 
@@ -309,6 +552,7 @@ public final class WrapperInstaller {
 		UIManager.put("TextArea.selectionForeground", selectionForeground);
 		UIManager.put("ComboBox.background", control);
 		UIManager.put("ComboBox.foreground", foreground);
+		UIManager.put("ComboBox.focus", control);
 		UIManager.put("ComboBox.buttonBackground", control);
 		UIManager.put("ComboBox.buttonHighlight", control);
 		UIManager.put("ComboBox.buttonDarkShadow", control.darker());
@@ -337,20 +581,26 @@ public final class WrapperInstaller {
 		UIManager.put("ToolTip.foreground", foreground);
 	}
 
-	private JPanel createInstallerPanel(JFrame frame, String initialLabel, Color initialColor) {
+	private JPanel createInstallerPanel(JFrame frame) {
 		JPanel panel = new JPanel(new GridBagLayout());
 		panel.setBorder(BorderFactory.createEmptyBorder(12, 16, 12, 16));
+		makeBackgroundFocusable(panel);
 		addComponentsToPane(panel);
 		JComboBox<String> versions = new JComboBox<>(new String[] {"Loading NeoForge versions..."});
 		JComboBox<String> action = new JComboBox<>(new String[] {"Client", "Server", "Fat installer"});
+		action.setPrototypeDisplayValue("Fat installer");
 		JTextField directory = new JTextField(new File(System.getProperty("user.dir")).getAbsolutePath());
 		directory.setEditable(false);
 		JComboBox<String> targetMode = new JComboBox<>(new String[] {"Custom directory", "Launcher profile"});
+		targetMode.setPrototypeDisplayValue("Custom directory");
 		JComboBox<String> profileType = new JComboBox<>(new String[] {"CurseForge", "Modrinth"});
+		profileType.setPrototypeDisplayValue("CurseForge");
 		JComboBox<Path> profiles = new JComboBox<>();
+		profiles.setPrototypeDisplayValue(Path.of("Example profile"));
 		profiles.setEnabled(false);
 		JComboBox<String> profilesLocationMode = new JComboBox<>(new String[] {
 				"Detect launcher profile locations", "Use custom profile location"});
+		profilesLocationMode.setPrototypeDisplayValue("Use custom profile location");
 		JTextField profilesLocation = new JTextField();
 		profilesLocation.setEditable(false);
 		JButton chooseProfilesLocation = new JButton("Browse…");
@@ -358,10 +608,12 @@ public final class WrapperInstaller {
 		status.setEditable(false);
 		status.setLineWrap(true);
 		status.setWrapStyleWord(true);
-		JLabel completion = new JLabel(initialLabel);
-		completion.setForeground(initialColor);
+		JLabel completion = new JLabel("Ready");
+		completion.setForeground(Color.GRAY);
 		JButton browse = new JButton("Choose directory");
 		JButton install = new JButton("Download and install");
+  JButton installJava = new JButton("Install Microsoft OpenJDK " + JavaRuntimeManager.recommendedMajor() + " with Jabba");
+  installJava.setToolTipText("Install Microsoft OpenJDK 25 through Jabba and add it to your user PATH.");
 
 		JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
 		toolbar.add(new JLabel("Install action:"));
@@ -369,19 +621,21 @@ public final class WrapperInstaller {
 		toolbar.add(action);
 		toolbar.add(Box.createHorizontalStrut(6));
 		toolbar.add(install);
-		panel.add(toolbar, constraints(0, 2, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(new JLabel("NeoForge version:"), constraints(0, 3, 1, 1, 0, 0, GridBagConstraints.NONE));
-		panel.add(versions, constraints(0, 4, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(new JLabel("Install destination:"), constraints(0, 5, 1, 1, 0, 0, GridBagConstraints.NONE));
+  toolbar.add(Box.createHorizontalStrut(12));
+  toolbar.add(installJava);
+		panel.add(toolbar, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JLabel("NeoForge version:"), constraints(0, 3, 0, 0, GridBagConstraints.NONE));
+		panel.add(versions, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JLabel("Install destination:"), constraints(0, 5, 0, 0, GridBagConstraints.NONE));
 
 		JPanel targetModePanel = new JPanel(new BorderLayout(6, 0));
 		targetModePanel.add(targetMode, BorderLayout.WEST);
-		panel.add(targetModePanel, constraints(0, 6, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(targetModePanel, constraints(0, 6, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel profilePanel = new JPanel(new BorderLayout(6, 0));
 		profilePanel.add(profileType, BorderLayout.WEST);
 		profilePanel.add(profiles, BorderLayout.CENTER);
-		panel.add(profilePanel, constraints(0, 7, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(profilePanel, constraints(0, 7, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel profilesLocationPanel = new JPanel(new BorderLayout(6, 6));
 		JPanel profilesLocationDetails = new JPanel(new BorderLayout(6, 0));
@@ -390,18 +644,18 @@ public final class WrapperInstaller {
 		profilesLocationPanel.add(profilesLocationMode, BorderLayout.NORTH);
 		profilesLocationPanel.add(profilesLocationDetails, BorderLayout.CENTER);
 		profilesLocationPanel.add(chooseProfilesLocation, BorderLayout.EAST);
-		panel.add(profilesLocationPanel, constraints(0, 8, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(profilesLocationPanel, constraints(0, 8, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel directoryPanel = new JPanel(new BorderLayout(6, 0));
 		directoryPanel.add(directory, BorderLayout.CENTER);
 		directoryPanel.add(browse, BorderLayout.EAST);
-		panel.add(directoryPanel, constraints(0, 9, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(directoryPanel, constraints(0, 9, 1, 0, GridBagConstraints.HORIZONTAL));
 
-		panel.add(new JScrollPane(status), constraints(0, 10, 1, 1, 1, 1, GridBagConstraints.BOTH));
+		panel.add(new JScrollPane(status), constraints(0, 10, 1, 1, GridBagConstraints.BOTH));
 
 		StatusBox statusBox = new StatusBox();
-		panel.add(statusBox, constraints(0, 11, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(completion, constraints(0, 12, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(statusBox, constraints(0, 11, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(completion, constraints(0, 12, 1, 0, GridBagConstraints.HORIZONTAL));
 		profilePanel.setVisible(false);
 		profilesLocationPanel.setVisible(false);
 
@@ -447,7 +701,7 @@ public final class WrapperInstaller {
 			profilesLocationPanel.setVisible(launcherProfileSelected);
 			directoryPanel.setVisible(!launcherProfileSelected);
 			profiles.setEnabled(launcherProfileSelected);
-			if (launcherProfileSelected) {
+   if (launcherProfileSelected) {
 				refreshProfiles.run();
 			} else {
 				target[0] = customTarget[0];
@@ -457,7 +711,7 @@ public final class WrapperInstaller {
 			panel.repaint();
 		};
 		targetMode.addActionListener(event -> updateDestinationControls.run());
-		profilesLocationMode.addActionListener(event -> updateProfilesLocationControls.run());
+  profilesLocationMode.addActionListener(event -> updateProfilesLocationControls.run());
 		profileType.addActionListener(event -> refreshProfiles.run());
 		profiles.addActionListener(event -> {
 			Path selected = (Path) profiles.getSelectedItem();
@@ -488,6 +742,7 @@ public final class WrapperInstaller {
 				targetMode.setSelectedIndex(0);
 			}
 		});
+  installJava.addActionListener(event -> startJavaInstallation(frame, installJava, status, completion, statusBox));
   install.addActionListener(event -> {
             if (targetMode.getSelectedIndex() == 1 && profiles.getSelectedItem() == null) {
 				completion.setText("Profile required");
@@ -495,11 +750,21 @@ public final class WrapperInstaller {
 				status.append("Select an existing CurseForge or Modrinth profile first.\n");
 				return;
 			}
-            startInstallation(frame, versions, action, target[0], targetMode.getSelectedIndex() == 1,
-                    status, completion, install, statusBox);
+         			startInstallation(frame, versions, action, target[0], targetMode.getSelectedIndex() == 1,
+     status, completion, install, statusBox);
         });
 		loadVersions(versions, status);
 		return panel;
+	}
+
+	static void makeBackgroundFocusable(JPanel panel) {
+		panel.setFocusable(true);
+		panel.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mousePressed(java.awt.event.MouseEvent event) {
+				panel.requestFocusInWindow();
+			}
+		});
 	}
 
 	private static List<Path> customProfileRoots(String location) {
@@ -537,9 +802,54 @@ public final class WrapperInstaller {
 		}.execute();
 	}
 
- private static void startInstallation(JFrame frame, JComboBox<String> versions, JComboBox<String> action,
-            File target, boolean launcherProfile, JTextArea status, JLabel completion, JButton install,
+ private static void startJavaInstallation(JFrame frame, JButton installJava, JTextArea status, JLabel completion,
             StatusBox statusBox) {
+        installJava.setEnabled(false);
+        completion.setText("Installing Java...");
+        completion.setForeground(new Color(180, 110, 0));
+        statusBox.setState(StatusBox.State.IN_PROGRESS);
+        status.setText("Installing Microsoft OpenJDK " + JavaRuntimeManager.recommendedMajor() + " with Jabba...\n");
+        new SwingWorker<Void, String>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                JavaRuntimeManager.ensureJdk(JavaRuntimeManager.recommendedMajor(), line -> publish(line + "\n"));
+                return null;
+            }
+
+            @Override
+            protected void process(List<String> messages) {
+                messages.forEach(status::append);
+            }
+
+            @Override
+            protected void done() {
+                installJava.setEnabled(true);
+                frame.revalidate();
+                frame.repaint();
+                try {
+                    get();
+                    status.append("Java installation completed successfully.\n");
+                    completion.setText("Java installation complete");
+                    completion.setForeground(new Color(0, 128, 0));
+                    statusBox.setState(StatusBox.State.SUCCESS);
+                } catch (Exception exception) {
+                    Throwable failure = exception instanceof ExecutionException && exception.getCause() != null
+                            ? exception.getCause() : exception;
+                    String message = failure.getMessage() == null || failure.getMessage().isBlank()
+                            ? failure.toString() : failure.getMessage();
+                    status.append("Java installation failed: " + message + "\n");
+                    completion.setText("Java installation failed");
+                    completion.setForeground(Color.RED);
+                    statusBox.setState(StatusBox.State.FAILURE);
+                    JOptionPane.showMessageDialog(frame, message, "Java installation failed", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+ private static void startInstallation(JFrame frame, JComboBox<String> versions, JComboBox<String> action,
+            File target, boolean launcherProfile, JTextArea status, JLabel completion,
+            JButton install, StatusBox statusBox) {
         String version = (String) versions.getSelectedItem();
         if (!launcherProfile && (version == null || version.startsWith("Loading"))) {
             return;
@@ -556,7 +866,7 @@ public final class WrapperInstaller {
   status.setText(launcherProfile
           ? "Reading the selected profile and preparing AutoModpack...\n"
           : "Downloading official NeoForge " + version + " installer...\n");
-		new SwingWorker<Integer, String>() {
+		 new SwingWorker<Integer, String>() {
    @Override
    protected Integer doInBackground() throws Exception {
        if (!shouldInstallNeoForge(launcherProfile)) {
@@ -570,11 +880,18 @@ public final class WrapperInstaller {
                    line -> publish(line + "\n"));
            return 0;
        }
+				if ("--installClient".equals(selectedAction)) {
+					String preflightError = clientInstallPreflightError(target);
+					if (preflightError != null) {
+						throw new IllegalArgumentException(preflightError);
+					}
+				}
        File installerJar = OfficialInstallerLauncher.download(version);
 				publish("Downloaded official installer: " + installerJar + "\nStarting installation...\n");
 				File destination = selectedAction.equals("--fat-installer")
 						? new File(target, "neoforge-" + version + "-fat.jar") : target;
-				return runInstallation(installerJar, selectedAction, version, destination, line -> publish(line + "\n"));
+    return runInstallation(installerJar, selectedAction, version, destination, null,
+						line -> publish(line + "\n"));
 			}
 
 			@Override
@@ -599,11 +916,15 @@ public final class WrapperInstaller {
 						statusBox.setState(StatusBox.State.FAILURE);
 					}
 				} catch (Exception exception) {
-					status.append("Installation failed: " + exception.getMessage() + "\n");
+					Throwable failure = exception instanceof ExecutionException && exception.getCause() != null
+							? exception.getCause() : exception;
+					String message = failure.getMessage() == null || failure.getMessage().isBlank()
+							? failure.toString() : failure.getMessage();
+					status.append("Installation failed: " + message + "\n");
 					completion.setText("Installation failed");
 					completion.setForeground(Color.RED);
 					statusBox.setState(StatusBox.State.FAILURE);
-					JOptionPane.showMessageDialog(frame, exception.toString(), "Installation failed", JOptionPane.ERROR_MESSAGE);
+					JOptionPane.showMessageDialog(frame, message, "Installation failed", JOptionPane.ERROR_MESSAGE);
 				}
 			}
 		}.execute();
@@ -620,8 +941,8 @@ public final class WrapperInstaller {
 			setLayout(new GridBagLayout());
 			setBorder(BorderFactory.createTitledBorder("Status"));
 			indicator.setPreferredSize(new Dimension(16, 16));
-			add(indicator, constraints(0, 0, 1, 1, 0, 0, GridBagConstraints.NONE));
-			add(label, constraints(1, 0, 1, 1, 1, 0, GridBagConstraints.HORIZONTAL));
+			add(indicator, constraints(0, 0, 0, 0, GridBagConstraints.NONE));
+			add(label, constraints(1, 0, 1, 0, GridBagConstraints.HORIZONTAL));
 			setState(State.IDLE);
 		}
 

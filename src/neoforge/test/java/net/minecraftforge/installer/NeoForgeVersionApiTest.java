@@ -12,9 +12,19 @@ class NeoForgeVersionApiTest {
     void parsesAndSortsVersions() {
         List<String> versions = NeoForgeVersionApi.parseVersions(
                 "<metadata><versioning><versions><version>1.20.1-1.0.0</version>"
-                        + "<version>1.21.1-2.0.0</version></versions></versioning></metadata>");
+                        + "<version>1.21.1-2.0.0</version>"
+                        + "<version>1.21.1-10.0.0</version></versions></versioning></metadata>");
 
-        assertEquals(List.of("1.21.1-2.0.0", "1.20.1-1.0.0"), versions);
+        assertEquals(List.of("1.21.1-10.0.0", "1.21.1-2.0.0", "1.20.1-1.0.0"), versions);
+    }
+
+    @Test
+    void sortsMultiDigitNeoForgeBuildNumbersNumerically() {
+        List<String> versions = NeoForgeVersionApi.parseVersions(
+                "<metadata><versioning><versions><version>26.3.0.99</version>"
+                        + "<version>26.3.0.100</version></versions></versioning></metadata>");
+
+        assertEquals(List.of("26.3.0.100", "26.3.0.99"), versions);
     }
 
     @Test
