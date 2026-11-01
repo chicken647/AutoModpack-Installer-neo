@@ -88,6 +88,22 @@ class WrapperInstallerTest {
     }
 
     @Test
+    void showsDistinctReadableInstallationStates() {
+        WrapperInstaller.StatusBox statusBox = new WrapperInstaller.StatusBox();
+        javax.swing.JLabel label = (javax.swing.JLabel) statusBox.getComponent(1);
+
+        statusBox.setState(WrapperInstaller.StatusBox.State.IDLE);
+        assertEquals("Idle", label.getText());
+        statusBox.setState(WrapperInstaller.StatusBox.State.IN_PROGRESS);
+        assertEquals("In progress", label.getText());
+        statusBox.setState(WrapperInstaller.StatusBox.State.SUCCESS);
+        assertEquals("Success", label.getText());
+        statusBox.setState(WrapperInstaller.StatusBox.State.FAILURE);
+        assertEquals("Failure", label.getText());
+        assertFalse(label.getFont().isBold());
+    }
+
+    @Test
     void createsFlatControlBordersForBothThemes() {
         Border light = WrapperInstaller.flatControlBorder(WrapperInstaller.Theme.LIGHT);
         Border dark = WrapperInstaller.flatControlBorder(WrapperInstaller.Theme.DARK);
@@ -111,6 +127,19 @@ class WrapperInstallerTest {
         assertTrue(button.isRolloverEnabled());
         assertEquals(new Color(184, 207, 229), UIManager.getColor("Button.select"));
         assertTrue(button.getBorder() instanceof CompoundBorder);
+    }
+
+    @Test
+    void givesButtonsRoundedBeveledBorders() {
+        JButton button = new JButton("Browse");
+
+        WrapperInstaller.applyComponentTheme(button, WrapperInstaller.Theme.LIGHT);
+
+        assertTrue(button.getBorder() instanceof CompoundBorder);
+        Border outer = ((CompoundBorder) button.getBorder()).getOutsideBorder();
+        assertEquals("RoundedBevelBorder", outer.getClass().getSimpleName());
+        assertEquals(2, outer.getBorderInsets(button).top);
+        assertEquals(2, outer.getBorderInsets(button).left);
     }
 
     @Test
