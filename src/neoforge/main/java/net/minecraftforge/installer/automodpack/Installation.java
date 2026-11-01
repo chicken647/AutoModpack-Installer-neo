@@ -22,24 +22,29 @@ public final class Installation {
     public static void installAutomodpack(String gameVersion, String loader, Path minecraftDirectory,
             Consumer<String> output) {
         try {
-            String downloadUrl = ModrinthApi.getLatestDownloadUrl(loader, gameVersion);
-            if (downloadUrl == null) {
-                output.accept("AutoModpack is not available for " + loader + " on Minecraft " + gameVersion);
-                return;
-            }
-
-            Path modsDirectory = minecraftDirectory.resolve("mods");
-            Files.createDirectories(modsDirectory);
-            String path = new URL(downloadUrl).getPath();
-            String fileName = path.substring(path.lastIndexOf('/') + 1);
-            output.accept("Downloading AutoModpack " + fileName);
-            try (InputStream input = new URL(downloadUrl).openStream()) {
-                Files.copy(input, modsDirectory.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
-            }
-            output.accept("AutoModpack installed: " + modsDirectory.resolve(fileName));
+            installAutomodpackOrThrow(gameVersion, loader, minecraftDirectory, output);
         } catch (IOException e) {
-            output.accept("Failed to download AutoModpack: " + e.getMessage());
+            output.accept("Failed to install AutoModpack: " + e.getMessage());
         }
+    }
+
+    public static void installAutomodpackOrThrow(String gameVersion, String loader, Path minecraftDirectory,
+            Consumer<String> output) throws IOException {
+        String downloadUrl = ModrinthApi.getLatestDownloadUrl(loader, gameVersion);
+        if (downloadUrl == null) {
+            throw new IOException("AutoModpack is not available for " + loader
+                    + " on Minecraft " + gameVersion);
+        }
+
+        Path modsDirectory = minecraftDirectory.resolve("mods");
+        Files.createDirectories(modsDirectory);
+        String path = new URL(downloadUrl).getPath();
+        String fileName = path.substring(path.lastIndexOf('/') + 1);
+        output.accept("Downloading AutoModpack " + fileName);
+        try (InputStream input = new URL(downloadUrl).openStream()) {
+            Files.copy(input, modsDirectory.resolve(fileName), StandardCopyOption.REPLACE_EXISTING);
+        }
+        output.accept("AutoModpack installed: " + modsDirectory.resolve(fileName));
     }
 
     public static void installAutomodpack(String gameVersion, Path minecraftDirectory, Object monitor) {

@@ -104,8 +104,10 @@ public final class WrapperInstaller {
                 ? OfficialInstallerLauncher.run(installer, safeAction, safeTarget, output)
                 : OfficialInstallerLauncher.run(installer, safeAction, safeTarget, javaExecutable, output);
         if (exitCode == 0 && installsGame(safeAction)) {
-            output.accept("NeoForge installation finished. Checking for AutoModpack... ");
-            Installation.installAutomodpack(minecraftVersion(safeVersion), safeTarget.toPath(), output);
+            output.accept("NeoForge installation finished. Installing AutoModpack...\n");
+            Installation.installAutomodpackOrThrow(minecraftVersion(safeVersion), "neoforge",
+                    safeTarget.toPath(), output);
+            output.accept("NeoForge and AutoModpack installation completed successfully.\n");
         }
         return exitCode;
     }
@@ -280,7 +282,13 @@ public final class WrapperInstaller {
 			installComboHoverFeedback(comboBox, control, UIManager.getColor("ComboBox.selectionBackground"));
 		} else if (component instanceof JButton button) {
 			button.setRolloverEnabled(true);
-			button.setBorder(flatControlBorder(theme));
+			if (!(button.getParent() instanceof JComboBox<?>)) {
+				button.setUI(new RoundedButtonUI());
+				button.setContentAreaFilled(false);
+				button.setOpaque(false);
+				button.setFocusPainted(false);
+				button.setBorder(buttonBorder(theme));
+			}
 			installHoverFeedback(button, control, UIManager.getColor("Button.select"));
 		} else if (component instanceof JTextField || component instanceof JScrollPane) {
 			((JComponent) component).setBorder(flatControlBorder(theme));
@@ -443,6 +451,66 @@ public final class WrapperInstaller {
 		return BorderFactory.createCompoundBorder(
 				BorderFactory.createLineBorder(borderColor),
 				BorderFactory.createEmptyBorder(4, 8, 4, 8));
+	}
+
+	static javax.swing.border.Border buttonBorder(Theme theme) {
+		Color highlight = theme == Theme.LIGHT ? Color.WHITE : new Color(125, 125, 125);
+		Color shadow = theme == Theme.LIGHT ? new Color(145, 145, 145) : new Color(30, 30, 30);
+		return BorderFactory.createCompoundBorder(
+				new RoundedBevelBorder(highlight, shadow),
+				BorderFactory.createEmptyBorder(3, 8, 3, 8));
+	}
+
+	private static final class RoundedBevelBorder extends javax.swing.border.AbstractBorder {
+		private final Color highlight;
+		private final Color shadow;
+
+		private RoundedBevelBorder(Color highlight, Color shadow) {
+			this.highlight = highlight;
+			this.shadow = shadow;
+		}
+
+		@Override
+		public Insets getBorderInsets(Component component) {
+			return new Insets(2, 2, 2, 2);
+		}
+
+		@Override
+		public Insets getBorderInsets(Component component, Insets insets) {
+			insets.set(2, 2, 2, 2);
+			return insets;
+		}
+
+		@Override
+		public void paintBorder(Component component, Graphics graphics, int x, int y, int width, int height) {
+			Graphics2D graphics2D = (Graphics2D) graphics.create();
+			try {
+				graphics2D.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+						RenderingHints.VALUE_ANTIALIAS_ON);
+				graphics2D.setColor(highlight);
+				graphics2D.drawRoundRect(x, y, width - 2, height - 2, 9, 9);
+				graphics2D.setColor(shadow);
+				graphics2D.drawRoundRect(x + 1, y + 1, width - 2, height - 2, 9, 9);
+			} finally {
+				graphics2D.dispose();
+			}
+		}
+	}
+
+	private static final class RoundedButtonUI extends javax.swing.plaf.basic.BasicButtonUI {
+		@Override
+		public void paint(Graphics graphics, JComponent component) {
+			Graphics2D graphics2D = (Graphics2D) graphics.create();
+			try {
+				graphics2D.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+						RenderingHints.VALUE_ANTIALIAS_ON);
+				graphics2D.setColor(component.getBackground());
+				graphics2D.fillRoundRect(1, 1, component.getWidth() - 2, component.getHeight() - 2, 9, 9);
+			} finally {
+				graphics2D.dispose();
+			}
+			super.paint(graphics, component);
+		}
 	}
 
 	private static final class FocusAwareComboBoxBorder extends LineBorder {
@@ -615,27 +683,37 @@ public final class WrapperInstaller {
   JButton installJava = new JButton("Install Microsoft OpenJDK " + JavaRuntimeManager.recommendedMajor() + " with Jabba");
   installJava.setToolTipText("Install Microsoft OpenJDK 25 through Jabba and add it to your user PATH.");
 
+		JPanel installationPanel = new JPanel(new GridBagLayout());
+		installationPanel.setBorder(BorderFactory.createTitledBorder("Installation"));
 		JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
 		toolbar.add(new JLabel("Install action:"));
 		toolbar.add(Box.createHorizontalStrut(6));
 		toolbar.add(action);
 		toolbar.add(Box.createHorizontalStrut(6));
 		toolbar.add(install);
-  toolbar.add(Box.createHorizontalStrut(12));
-  toolbar.add(installJava);
-		panel.add(toolbar, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(new JLabel("NeoForge version:"), constraints(0, 3, 0, 0, GridBagConstraints.NONE));
-		panel.add(versions, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(new JLabel("Install destination:"), constraints(0, 5, 0, 0, GridBagConstraints.NONE));
+		installationPanel.add(toolbar, constraints(0, 0, 1, 0, GridBagConstraints.HORIZONTAL));
+		installationPanel.add(new JLabel("NeoForge version:"), constraints(0, 1, 0, 0, GridBagConstraints.NONE));
+		installationPanel.add(versions, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(installationPanel, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
 
+        JPanel javaPanel = new JPanel(new BorderLayout(10, 0));
+        javaPanel.setBorder(BorderFactory.createTitledBorder("Java runtime"));
+        javaPanel.add(new JLabel("Install the required Microsoft OpenJDK:"),
+                BorderLayout.CENTER);
+        javaPanel.add(installJava, BorderLayout.EAST);
+        panel.add(javaPanel, constraints(0, 3, 1, 0, GridBagConstraints.HORIZONTAL));
+
+		JPanel destinationPanel = new JPanel(new GridBagLayout());
+		destinationPanel.setBorder(BorderFactory.createTitledBorder("Destination"));
+		destinationPanel.add(new JLabel("Install destination:"), constraints(0, 0, 0, 0, GridBagConstraints.NONE));
 		JPanel targetModePanel = new JPanel(new BorderLayout(6, 0));
 		targetModePanel.add(targetMode, BorderLayout.WEST);
-		panel.add(targetModePanel, constraints(0, 6, 1, 0, GridBagConstraints.HORIZONTAL));
+		destinationPanel.add(targetModePanel, constraints(0, 1, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel profilePanel = new JPanel(new BorderLayout(6, 0));
 		profilePanel.add(profileType, BorderLayout.WEST);
 		profilePanel.add(profiles, BorderLayout.CENTER);
-		panel.add(profilePanel, constraints(0, 7, 1, 0, GridBagConstraints.HORIZONTAL));
+		destinationPanel.add(profilePanel, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel profilesLocationPanel = new JPanel(new BorderLayout(6, 6));
 		JPanel profilesLocationDetails = new JPanel(new BorderLayout(6, 0));
@@ -644,18 +722,22 @@ public final class WrapperInstaller {
 		profilesLocationPanel.add(profilesLocationMode, BorderLayout.NORTH);
 		profilesLocationPanel.add(profilesLocationDetails, BorderLayout.CENTER);
 		profilesLocationPanel.add(chooseProfilesLocation, BorderLayout.EAST);
-		panel.add(profilesLocationPanel, constraints(0, 8, 1, 0, GridBagConstraints.HORIZONTAL));
+		destinationPanel.add(profilesLocationPanel, constraints(0, 3, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel directoryPanel = new JPanel(new BorderLayout(6, 0));
 		directoryPanel.add(directory, BorderLayout.CENTER);
 		directoryPanel.add(browse, BorderLayout.EAST);
-		panel.add(directoryPanel, constraints(0, 9, 1, 0, GridBagConstraints.HORIZONTAL));
+		destinationPanel.add(directoryPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(destinationPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
 
-		panel.add(new JScrollPane(status), constraints(0, 10, 1, 1, GridBagConstraints.BOTH));
+		JPanel activityPanel = new JPanel(new BorderLayout(0, 6));
+		activityPanel.setBorder(BorderFactory.createTitledBorder("Activity"));
+		activityPanel.add(new JScrollPane(status), BorderLayout.CENTER);
 
 		StatusBox statusBox = new StatusBox();
-		panel.add(statusBox, constraints(0, 11, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(completion, constraints(0, 12, 1, 0, GridBagConstraints.HORIZONTAL));
+		activityPanel.add(statusBox, BorderLayout.SOUTH);
+		activityPanel.add(completion, BorderLayout.NORTH);
+		panel.add(activityPanel, constraints(0, 5, 1, 1, GridBagConstraints.BOTH));
 		profilePanel.setVisible(false);
 		profilesLocationPanel.setVisible(false);
 
@@ -876,8 +958,9 @@ public final class WrapperInstaller {
            }
            publish("Existing " + profile.loader() + " profile detected for Minecraft "
                    + profile.gameVersion() + ". Skipping NeoForge installation.\n");
-           Installation.installAutomodpack(profile.gameVersion(), profile.loader(), target.toPath(),
+           Installation.installAutomodpackOrThrow(profile.gameVersion(), profile.loader(), target.toPath(),
                    line -> publish(line + "\n"));
+           publish("AutoModpack installation completed successfully.\n");
            return 0;
        }
 				if ("--installClient".equals(selectedAction)) {
@@ -910,7 +993,8 @@ public final class WrapperInstaller {
 						completion.setForeground(new Color(0, 128, 0));
 						statusBox.setState(StatusBox.State.SUCCESS);
 					} else {
-						status.append("Official installer exited with code " + result + ".\n");
+						status.append("The official installer did not complete (exit code " + result
+								+ "). No successful installation was reported.\n");
 						completion.setText("Installation failed (exit code " + result + ")");
 						completion.setForeground(Color.RED);
 						statusBox.setState(StatusBox.State.FAILURE);
