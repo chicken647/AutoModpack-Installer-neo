@@ -43,7 +43,7 @@ public final class WrapperInstaller {
             this.displayName = displayName;
             this.downloadUrl = downloadUrl;
         }
-8
+
         String displayName() {
             return displayName;
         }
