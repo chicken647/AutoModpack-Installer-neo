@@ -7,6 +7,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -46,8 +47,46 @@ final class NeoForgeVersionApi {
             result.add(values.substring(start, end));
             cursor = end + "</version>".length();
         }
-        result.sort(Collections.reverseOrder());
+        result.sort(Comparator.comparing(NeoForgeVersionApi::versionParts,
+                NeoForgeVersionApi::compareVersionParts).reversed());
         return result;
+    }
+
+    private static List<String> versionParts(String version) {
+        List<String> parts = new ArrayList<>();
+        for (String part : version.split("[.-]")) {
+            parts.add(part);
+        }
+        return parts;
+    }
+
+    private static int compareVersionParts(List<String> left, List<String> right) {
+        int count = Math.max(left.size(), right.size());
+        for (int index = 0; index < count; index++) {
+            String leftPart = index < left.size() ? left.get(index) : "";
+            String rightPart = index < right.size() ? right.get(index) : "";
+            boolean leftNumeric = leftPart.chars().allMatch(Character::isDigit);
+            boolean rightNumeric = rightPart.chars().allMatch(Character::isDigit);
+            int comparison;
+            if (leftNumeric && rightNumeric) {
+                comparison = compareNumericParts(leftPart, rightPart);
+            } else if (leftNumeric != rightNumeric) {
+                comparison = leftNumeric ? 1 : -1;
+            } else {
+                comparison = leftPart.compareToIgnoreCase(rightPart);
+            }
+            if (comparison != 0) {
+                return comparison;
+            }
+        }
+        return 0;
+    }
+
+    private static int compareNumericParts(String left, String right) {
+        String normalizedLeft = left.replaceFirst("^0+(?!$)", "");
+        String normalizedRight = right.replaceFirst("^0+(?!$)", "");
+        int lengthComparison = Integer.compare(normalizedLeft.length(), normalizedRight.length());
+        return lengthComparison != 0 ? lengthComparison : normalizedLeft.compareTo(normalizedRight);
     }
 
     static String installerUrl(String version) {
