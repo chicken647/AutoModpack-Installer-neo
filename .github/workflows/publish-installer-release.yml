@@ -133,48 +133,42 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install WiX Toolset
-        run: choco install wixtoolset --no-progress --yes
-
-      - name: Add WiX Toolset to PATH
-        shell: pwsh
-        run: |
-          $wix = Get-ChildItem "${env:ProgramFiles(x86)}\WiX Toolset*" -Directory |
-            Sort-Object Name -Descending |
-            Select-Object -First 1
-          if (-not $wix) {
-            throw "WiX Toolset installation was not found."
-          }
-          "$($wix.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
       - name: Build versioned installer JAR
         run: .\gradlew.bat clean shadowJar "-PreleaseVersion=${{ needs.release.outputs.version }}"
 
-      - name: Package Windows installer
+      - name: Package portable Windows app
         shell: pwsh
         run: |
           $version = "${{ needs.release.outputs.version }}"
           $appVersion = $version -replace '-.*$', ''
           $inputDirectory = "build\jpackage-input"
+          $outputDirectory = "build\jpackage"
           New-Item -ItemType Directory -Force -Path $inputDirectory | Out-Null
-          New-Item -ItemType Directory -Force -Path "build\jpackage" | Out-Null
+          New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
           Copy-Item "build\libs\legacyinstaller-$version-fatjar.jar" $inputDirectory
           jpackage `
-            --type exe `
+            --type app-image `
             --input $inputDirectory `
-            --dest build\jpackage `
+            --dest $outputDirectory `
             --name AutoModpackInstaller `
             --main-jar "legacyinstaller-$version-fatjar.jar" `
             --main-class net.minecraftforge.installer.WrapperInstaller `
             --app-version $appVersion `
-            --vendor "AutoModpack" `
-            --win-menu `
-            --win-shortcut
+            --vendor "AutoModpack"
 
-      - name: Add Windows installer to GitHub release
+          $appImage = Join-Path $outputDirectory "AutoModpackInstaller"
+          $launcher = Join-Path $appImage "AutoModpackInstaller.exe"
+          $runtime = Join-Path $appImage "runtime"
+          if (-not (Test-Path $launcher) -or -not (Test-Path $runtime)) {
+            throw "The portable app image is missing its launcher or bundled Java runtime."
+          }
+          $archive = Join-Path $outputDirectory "AutoModpackInstaller-$version-windows-x64.zip"
+          Compress-Archive -Path "$appImage\*" -DestinationPath $archive -Force
+
+      - name: Add portable Windows app to GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.release.outputs.version }}
-          files: build/jpackage/AutoModpackInstaller-${{ needs.release.outputs.version }}.exe
+          files: build/jpackage/AutoModpackInstaller-${{ needs.release.outputs.version }}-windows-x64.zip
           overwrite_files: true
           fail_on_unmatched_files: true
