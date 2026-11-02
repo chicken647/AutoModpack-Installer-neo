@@ -151,6 +151,7 @@ tasks.register('verifyFatJarContents') {
         try {
             assert fatJar.getEntry('net/minecraftforge/installer/WrapperInstaller.class') != null
             assert fatJar.getEntry('install_profile.json') == null
+            assert fatJar.manifest.mainAttributes.getValue('Main-Class') == MAIN_CLASS
             assert fatJar.manifest.getAttributes('net/minecraftforge/installer/')
                     .getValue('Implementation-Version') == project.version.toString()
         } finally {
