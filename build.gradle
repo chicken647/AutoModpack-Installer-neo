@@ -86,7 +86,15 @@ license {
   newLine false
 }
 
-version = '1.0.0'
+def releaseVersion = providers.gradleProperty('releaseVersion').orNull
+if (releaseVersion != null) {
+    if (!(releaseVersion ==~ /[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?/)) {
+        throw new GradleException("Invalid releaseVersion '${releaseVersion}'. Expected MAJOR.MINOR.PATCH with an optional prerelease suffix.")
+    }
+    version = releaseVersion
+} else {
+    version = '1.0.0'
+}
 println('Installer Version: ' + version)
 
 ext {
@@ -132,7 +140,7 @@ shadowJar {
     archiveClassifier = 'fatjar'
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     manifest {
-        attributes('Main-Class': 'net.minecraftforge.installer.WrapperInstaller')
+        from(MANIFEST)
     }
 }
 
@@ -143,6 +151,8 @@ tasks.register('verifyFatJarContents') {
         try {
             assert fatJar.getEntry('net/minecraftforge/installer/WrapperInstaller.class') != null
             assert fatJar.getEntry('install_profile.json') == null
+            assert fatJar.manifest.getAttributes('net/minecraftforge/installer/')
+                    .getValue('Implementation-Version') == project.version.toString()
         } finally {
             fatJar.close()
         }

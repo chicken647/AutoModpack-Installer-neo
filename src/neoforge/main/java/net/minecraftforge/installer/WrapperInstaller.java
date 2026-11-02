@@ -2,6 +2,7 @@ package net.minecraftforge.installer;
 
 import java.awt.*;
 import javax.swing.*;
+import java.net.URI;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -33,6 +34,26 @@ public final class WrapperInstaller {
     private static final int HOVER_ANIMATION_DURATION = 180;
     private static final int HOVER_ANIMATION_INTERVAL = 15;
     private static final Theme DEFAULT_THEME = Theme.DARK;
+    private static final String THEME_PROPERTY = "WrapperInstaller.theme";
+    private static final String DOWNLOAD_PAGE = "https://github.com/chicken647/AutoModpack-Installer-neo/releases";
+    private static final List<AboutLink> ABOUT_LINKS = List.of(
+            new AboutLink("Download page", DOWNLOAD_PAGE),
+            new AboutLink("LegacyInstaller", "https://github.com/neoforged/LegacyInstaller"),
+            new AboutLink("AutoModpack Installer", "https://github.com/Skidamek/AutoModpack-Installer"),
+            new AboutLink("AutoModpack", "https://modrinth.com/mod/automodpack"),
+            new AboutLink("NeoForge", "https://neoforged.net/"),
+            new AboutLink("Modrinth", "https://modrinth.com/"),
+            new AboutLink("CurseForge", "https://www.curseforge.com/"),
+            new AboutLink("Jabba", "https://github.com/shyiko/jabba"),
+            new AboutLink("Gson", "https://github.com/google/gson"));
+
+    record AboutLink(String label, String url) {
+    }
+
+    @FunctionalInterface
+    interface BrowserOpener {
+        void open(URI uri) throws Exception;
+    }
 
     enum Theme {
         LIGHT, DARK
@@ -228,6 +249,7 @@ public final class WrapperInstaller {
 	private void createAndShowGUI() {
 		applyThemeDefaults(DEFAULT_THEME);
 		JFrame frame = new JFrame("Installer");
+		frame.getRootPane().putClientProperty(THEME_PROPERTY, DEFAULT_THEME);
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.setContentPane(createInstallerPanel(frame));
 		frame.setJMenuBar(createMenuBar(frame));
@@ -263,15 +285,84 @@ public final class WrapperInstaller {
 		JMenu helpMenu = new JMenu("Help");
 		configureTopLevelMenu(helpMenu);
 		JMenuItem about = new JMenuItem("About");
-		about.addActionListener(event -> JOptionPane.showMessageDialog(frame,
-				"AutoModpack Installer\nInstalls AutoModpack and NeoForge when needed.",
-				"About", JOptionPane.INFORMATION_MESSAGE));
+		about.addActionListener(event -> showAboutDialog(frame));
 		helpMenu.add(about);
 
 		menuBar.add(fileMenu);
 		menuBar.add(settingsMenu);
 		menuBar.add(helpMenu);
 		return menuBar;
+	}
+
+	static JPanel createAboutPanel(BrowserOpener browserOpener, Consumer<String> errorHandler) {
+		JPanel panel = new JPanel(new GridBagLayout());
+		panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		int row = 0;
+		panel.add(new JLabel("AutoModpack Installer"),
+				constraints(0, row++, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JLabel("Version: " + applicationVersion()),
+				constraints(0, row++, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JLabel("Installs AutoModpack and NeoForge when needed."),
+				constraints(0, row++, 1, 0, GridBagConstraints.HORIZONTAL));
+		panel.add(new JLabel("Credits and project links"),
+				constraints(0, row++, 1, 0, GridBagConstraints.HORIZONTAL));
+		for (AboutLink link : ABOUT_LINKS) {
+			JButton linkButton = new JButton(link.label());
+			linkButton.setHorizontalAlignment(SwingConstants.LEFT);
+			linkButton.setToolTipText(link.url());
+			linkButton.putClientProperty("WrapperInstaller.aboutUrl", link.url());
+			linkButton.addActionListener(event -> openAboutLink(link.url(), browserOpener, errorHandler));
+			panel.add(linkButton, constraints(0, row++, 1, 0, GridBagConstraints.HORIZONTAL));
+		}
+		return panel;
+	}
+
+	static List<AboutLink> aboutLinks() {
+		return ABOUT_LINKS;
+	}
+
+	static String applicationVersion() {
+		Package applicationPackage = WrapperInstaller.class.getPackage();
+		return applicationVersion(applicationPackage == null ? null : applicationPackage.getImplementationVersion());
+	}
+
+	static String applicationVersion(String implementationVersion) {
+		return implementationVersion == null || implementationVersion.isBlank()
+				? "Development build" : implementationVersion;
+	}
+
+	static boolean openAboutLink(String url, BrowserOpener browserOpener, Consumer<String> errorHandler) {
+		try {
+			browserOpener.open(URI.create(url));
+			return true;
+		} catch (Exception exception) {
+			String reason = exception.getMessage();
+			String message = "Could not open this link: " + url + "\nOpen it manually in your browser.";
+			if (reason != null && !reason.isBlank()) {
+				message += "\n" + reason;
+			}
+			errorHandler.accept(message);
+			return false;
+		}
+	}
+
+	private static void showAboutDialog(JFrame frame) {
+		JPanel panel = createAboutPanel(WrapperInstaller::browse, message -> JOptionPane.showMessageDialog(frame,
+				message, "Unable to open link", JOptionPane.ERROR_MESSAGE));
+		applyComponentTheme(panel, currentTheme(frame));
+		JOptionPane.showMessageDialog(frame, panel, "About AutoModpack Installer", JOptionPane.INFORMATION_MESSAGE);
+	}
+
+	private static Theme currentTheme(JFrame frame) {
+		Object theme = frame.getRootPane().getClientProperty(THEME_PROPERTY);
+		return theme instanceof Theme ? (Theme) theme : DEFAULT_THEME;
+	}
+
+	private static void browse(URI uri) throws IOException {
+		if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+			throw new IOException("This computer does not support opening links automatically.");
+		}
+		Desktop.getDesktop().browse(uri);
 	}
 
 	private static void configureTopLevelMenu(JMenu menu) {
@@ -588,6 +679,7 @@ public final class WrapperInstaller {
 
 	private static void applyTheme(JFrame frame, Theme theme) {
 		try {
+			frame.getRootPane().putClientProperty(THEME_PROPERTY, theme);
 			applyComponentTheme(frame, theme);
 			frame.pack();
 			frame.repaint();

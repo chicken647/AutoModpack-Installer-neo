@@ -12,6 +12,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.Container;
 import java.awt.image.BufferedImage;
 import java.awt.event.MouseEvent;
 import java.io.ByteArrayOutputStream;
@@ -27,6 +28,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -177,6 +179,77 @@ class WrapperInstallerTest {
     @Test
     void defaultsToDarkTheme() {
         assertEquals(WrapperInstaller.Theme.DARK, WrapperInstaller.defaultTheme());
+    }
+
+    @Test
+    void aboutPanelDisplaysVersionAndOpensItsProjectLinks() throws Exception {
+        List<URI> openedLinks = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+        assertEquals("https://github.com/neoforged/LegacyInstaller", WrapperInstaller.aboutLinks().get(1).url());
+        assertEquals("https://github.com/Skidamek/AutoModpack-Installer", WrapperInstaller.aboutLinks().get(2).url());
+        SwingUtilities.invokeAndWait(() -> {
+            JMenuItem aboutItem = WrapperInstaller.createMenuBar(null).getMenu(2).getItem(0);
+            assertEquals("About", aboutItem.getText());
+            JPanel panel = WrapperInstaller.createAboutPanel(openedLinks::add, errors::add);
+            assertEquals("Version: " + WrapperInstaller.applicationVersion(),
+                    ((JLabel) panel.getComponent(1)).getText());
+
+            List<JButton> linkButtons = buttonsIn(panel);
+            assertEquals(WrapperInstaller.aboutLinks().size(), linkButtons.size());
+            for (int index = 0; index < linkButtons.size(); index++) {
+                JButton button = linkButtons.get(index);
+                WrapperInstaller.AboutLink link = WrapperInstaller.aboutLinks().get(index);
+                assertEquals(link.label(), button.getText());
+                assertEquals(link.url(), button.getClientProperty("WrapperInstaller.aboutUrl"));
+                assertEquals(link.url(), button.getToolTipText());
+                button.doClick();
+            }
+        });
+
+        assertEquals(WrapperInstaller.aboutLinks().stream().map(link -> URI.create(link.url())).toList(), openedLinks);
+        assertTrue(errors.isEmpty());
+    }
+
+    @Test
+    void aboutVersionUsesDevelopmentFallbackWhenManifestVersionIsUnavailable() {
+        assertEquals("Development build", WrapperInstaller.applicationVersion(null));
+        assertEquals("Development build", WrapperInstaller.applicationVersion(" "));
+        assertEquals("1.2.3", WrapperInstaller.applicationVersion("1.2.3"));
+    }
+
+    @Test
+    void aboutPanelUsesTheActiveLightAndDarkTheme() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            JPanel panel = WrapperInstaller.createAboutPanel(uri -> { }, message -> { });
+            for (WrapperInstaller.Theme theme : new WrapperInstaller.Theme[] {
+                    WrapperInstaller.Theme.DARK, WrapperInstaller.Theme.LIGHT}) {
+                WrapperInstaller.applyComponentTheme(panel, theme);
+                Color background = theme == WrapperInstaller.Theme.DARK
+                        ? new Color(43, 43, 43) : Color.WHITE;
+                Color foreground = theme == WrapperInstaller.Theme.DARK
+                        ? new Color(235, 235, 235) : Color.BLACK;
+                Color control = theme == WrapperInstaller.Theme.DARK
+                        ? new Color(65, 65, 65) : new Color(238, 238, 238);
+
+                assertEquals(background, panel.getBackground());
+                assertEquals(foreground, ((JLabel) panel.getComponent(0)).getForeground());
+                assertEquals(control, buttonsIn(panel).get(0).getBackground());
+            }
+        });
+    }
+
+    @Test
+    void aboutLinkReportsBrowserFailuresWithTheUrl() {
+        List<String> errors = new ArrayList<>();
+        String url = "https://example.test/download";
+
+        assertFalse(WrapperInstaller.openAboutLink(url,
+                uri -> { throw new IOException("Browser unavailable"); }, errors::add));
+
+        assertEquals(1, errors.size());
+        assertTrue(errors.get(0).contains(url));
+        assertTrue(errors.get(0).contains("Open it manually in your browser."));
+        assertTrue(errors.get(0).contains("Browser unavailable"));
     }
 
     @Test
@@ -756,5 +829,17 @@ class WrapperInstallerTest {
             }
         }
         return false;
+    }
+
+    private static List<JButton> buttonsIn(Container container) {
+        List<JButton> buttons = new ArrayList<>();
+        for (Component component : container.getComponents()) {
+            if (component instanceof JButton button) {
+                buttons.add(button);
+            } else if (component instanceof Container child) {
+                buttons.addAll(buttonsIn(child));
+            }
+        }
+        return buttons;
     }
 }

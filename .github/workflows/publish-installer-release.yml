@@ -1,0 +1,115 @@
+name: Publish installer release
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-installer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Calculate release version
+        id: calculated_version
+        uses: neoforged/action-tag-versioning@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          labels: ''
+          increment_last_component: true
+
+      - name: Validate release version
+        id: release_version
+        env:
+          VERSION: ${{ steps.calculated_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Calculated version '$VERSION' is not a supported MAJOR.MINOR.PATCH version." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Send Discord start notification
+        uses: neoforged/action-webhooks@v1
+        continue-on-error: true
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: 'started'
+          version: ${{ steps.release_version.outputs.version }}
+          include_commit_message: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check release tag target
+        env:
+          VERSION: ${{ steps.release_version.outputs.version }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          tag_ref="refs/tags/v${VERSION}"
+          tag_refs="$(git ls-remote origin "$tag_ref" "${tag_ref}^{}")"
+          if [[ -z "$tag_refs" ]]; then
+            echo "Tag v${VERSION} is available for ${TARGET_SHA}."
+            exit 0
+          fi
+
+          existing_sha="$(printf '%s\n' "$tag_refs" | awk -v tag_ref="$tag_ref" '$2 == tag_ref "^{}" { peeled = $1 } $2 == tag_ref { direct = $1 } END { if (peeled != "") print peeled; else print direct }')"
+          if [[ "$existing_sha" != "$TARGET_SHA" ]]; then
+            echo "Refusing to publish v${VERSION}: it already points to ${existing_sha}, not ${TARGET_SHA}." >&2
+            exit 1
+          fi
+          echo "Tag v${VERSION} already points at this commit; the release can be safely updated."
+
+      - name: Test and build versioned installer
+        env:
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+        run: ./gradlew clean test verifyFatJarContents "-PreleaseVersion=$RELEASE_VERSION"
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.release_version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: AutoModpack Installer ${{ steps.release_version.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ steps.release_version.outputs.prerelease }}
+          files: build/libs/legacyinstaller-${{ steps.release_version.outputs.version }}-fatjar.jar
+          overwrite_files: true
+          fail_on_unmatched_files: true
+
+      - name: Send Discord final notification
+        if: always()
+        uses: neoforged/action-webhooks@v1
+        continue-on-error: true
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: ${{ job.status }}
+          version: ${{ steps.release_version.outputs.version || 'unknown' }}
+          include_commit_message: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
