@@ -461,8 +461,9 @@ class WrapperInstallerTest {
         javax.swing.SwingUtilities.invokeAndWait(() -> {
             for (int width : new int[] {640, 960}) {
                 JPanel javaPanel = WrapperInstaller.createJavaRuntimePanel(new JButton("Install Java"));
-                JLabel javaLabel = (JLabel) javaPanel.getComponent(0);
-                JButton javaButton = (JButton) javaPanel.getComponent(1);
+                JPanel javaToolbar = (JPanel) javaPanel.getComponent(0);
+                JLabel javaLabel = (JLabel) javaToolbar.getComponent(0);
+                JButton javaButton = (JButton) javaToolbar.getComponent(2);
                 JLabel completion = new JLabel("Ready");
                 JPanel activityPanel = WrapperInstaller.createActivityPanel(new JTextArea(), completion,
                         new WrapperInstaller.StatusBox());
@@ -471,10 +472,13 @@ class WrapperInstallerTest {
                 javaPanel.setSize(width, 100);
                 activityPanel.setSize(width, 360);
                 javaPanel.doLayout();
+                javaToolbar.doLayout();
                 activityPanel.doLayout();
 
-                assertEquals(javaLabel.getX(), completion.getX());
+                assertEquals(javaToolbar.getX() + javaLabel.getX(), completion.getX());
                 assertTrue(javaButton.getX() > javaLabel.getX());
+                assertTrue(javaButton.getX() - javaLabel.getX() - javaLabel.getWidth() <= 8,
+                        "Java button should sit beside its label rather than at the far edge");
                 int initialLogHeight = activityLog.getHeight();
 
                 activityPanel.setSize(width, 560);
@@ -485,12 +489,45 @@ class WrapperInstallerTest {
     }
 
     @Test
+    void placesDestinationDirectlyAfterInstallation() {
+        JPanel sections = new JPanel(new java.awt.GridBagLayout());
+        JPanel installation = new JPanel();
+        JPanel destination = new JPanel();
+        JPanel javaRuntime = new JPanel();
+        JPanel launcherApps = new JPanel();
+        JPanel activity = new JPanel();
+
+        WrapperInstaller.addInstallerSections(sections, installation, destination, javaRuntime,
+                launcherApps, activity);
+
+        java.awt.GridBagLayout layout = (java.awt.GridBagLayout) sections.getLayout();
+        int installationRow = layout.getConstraints(installation).gridy;
+        int destinationRow = layout.getConstraints(destination).gridy;
+        assertEquals(installationRow + 1, destinationRow);
+        assertEquals(destinationRow + 1, layout.getConstraints(javaRuntime).gridy);
+        assertEquals(layout.getConstraints(javaRuntime).gridy + 1, layout.getConstraints(launcherApps).gridy);
+        assertEquals(layout.getConstraints(launcherApps).gridy + 1, layout.getConstraints(activity).gridy);
+    }
+
+    @Test
     void showsDistinctReadableInstallationStates() {
         WrapperInstaller.StatusBox statusBox = new WrapperInstaller.StatusBox();
         javax.swing.JLabel label = (javax.swing.JLabel) statusBox.getComponent(1);
 
         statusBox.setState(WrapperInstaller.StatusBox.State.IDLE);
-        assertEquals("Idle", label.getText());
+        assertEquals("Ready for action", label.getText());
+        Component indicator = statusBox.getComponent(0);
+        assertEquals("Ready for action", ((javax.swing.JComponent) indicator).getToolTipText());
+        indicator.setSize(16, 16);
+        BufferedImage icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = icon.createGraphics();
+        try {
+            indicator.paint(graphics);
+        } finally {
+            graphics.dispose();
+        }
+        assertEquals(0, icon.getRGB(0, 0) >>> 24, "Idle icon should not paint a gray square background");
+        assertTrue(hasBluePixels(icon), "Idle icon should use a distinct blue ready indicator");
         statusBox.setState(WrapperInstaller.StatusBox.State.IN_PROGRESS);
         assertEquals("In progress", label.getText());
         statusBox.setState(WrapperInstaller.StatusBox.State.SUCCESS);
@@ -526,7 +563,7 @@ class WrapperInstallerTest {
             statusBox.finishOperation(WrapperInstaller.StatusBox.State.FAILURE);
             assertEquals("Failure", label.getText());
             statusBox.resetCompletedOperation();
-            assertEquals("Idle", label.getText());
+            assertEquals("Ready for action", label.getText());
         });
     }
 
@@ -540,7 +577,7 @@ class WrapperInstallerTest {
                 WrapperInstaller.StatusBox statusBox = new WrapperInstaller.StatusBox(50);
                 JLabel label = (JLabel) statusBox.getComponent(1);
                 label.addPropertyChangeListener("text", event -> {
-                    if ("Idle".equals(event.getNewValue())) {
+                    if ("Ready for action".equals(event.getNewValue())) {
                         idle.countDown();
                     }
                 });
@@ -706,5 +743,18 @@ class WrapperInstallerTest {
 
 		assertEquals(UIManager.getColor("ComboBox.selectionBackground"), new Color(image.getRGB(150, 12)));
 		assertEquals(UIManager.getColor("ComboBox.selectionBackground"), new Color(image.getRGB(0, 12)));
+    }
+
+    private static boolean hasBluePixels(BufferedImage image) {
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                Color color = new Color(image.getRGB(x, y), true);
+                if (color.getAlpha() > 0 && color.getBlue() > color.getRed() + 25
+                        && color.getBlue() > color.getGreen()) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

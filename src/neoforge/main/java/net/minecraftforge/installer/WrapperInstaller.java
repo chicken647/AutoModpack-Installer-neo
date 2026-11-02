@@ -1061,19 +1061,6 @@ public final class WrapperInstaller {
 		installationPanel.add(toolbar, constraints(0, 0, 1, 0, GridBagConstraints.HORIZONTAL));
 		installationPanel.add(new JLabel("NeoForge version:"), constraints(0, 1, 0, 0, GridBagConstraints.NONE));
 		installationPanel.add(versions, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(installationPanel, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
-
-        JPanel javaPanel = createJavaRuntimePanel(installJava);
-        panel.add(javaPanel, constraints(0, 3, 1, 0, GridBagConstraints.HORIZONTAL));
-
-		JPanel launcherAppsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-		launcherAppsPanel.setBorder(BorderFactory.createTitledBorder("Launcher apps"));
-		launcherAppsPanel.add(new JLabel("Install a launcher app:"));
-		JButton installCurseForge = new JButton("Install CurseForge app");
-		JButton installModrinth = new JButton("Install Modrinth app");
-		launcherAppsPanel.add(installCurseForge);
-		launcherAppsPanel.add(installModrinth);
-		panel.add(launcherAppsPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel destinationPanel = new JPanel(new GridBagLayout());
 		destinationPanel.setBorder(BorderFactory.createTitledBorder("Destination"));
@@ -1100,12 +1087,21 @@ public final class WrapperInstaller {
 		directoryPanel.add(directory, BorderLayout.CENTER);
 		directoryPanel.add(browse, BorderLayout.EAST);
 		destinationPanel.add(directoryPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
-		panel.add(destinationPanel, constraints(0, 5, 1, 0, GridBagConstraints.HORIZONTAL));
+
+		JPanel javaPanel = createJavaRuntimePanel(installJava);
+
+		JPanel launcherAppsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+		launcherAppsPanel.setBorder(BorderFactory.createTitledBorder("Launcher apps"));
+		launcherAppsPanel.add(new JLabel("Install a launcher app:"));
+		JButton installCurseForge = new JButton("Install CurseForge app");
+		JButton installModrinth = new JButton("Install Modrinth app");
+		launcherAppsPanel.add(installCurseForge);
+		launcherAppsPanel.add(installModrinth);
 
 		StatusBox statusBox = new StatusBox();
 		statusBox.setOperationButtons(install, installJava, installCurseForge, installModrinth);
 		JPanel activityPanel = createActivityPanel(status, completion, statusBox);
-		panel.add(activityPanel, constraints(0, 6, 1, 1, GridBagConstraints.BOTH));
+		addInstallerSections(panel, installationPanel, destinationPanel, javaPanel, launcherAppsPanel, activityPanel);
 		profilePanel.setVisible(false);
 		profilesLocationPanel.setVisible(false);
 
@@ -1214,12 +1210,21 @@ public final class WrapperInstaller {
 	static JPanel createJavaRuntimePanel(JButton installJava) {
 		JPanel javaPanel = new JPanel(new GridBagLayout());
 		javaPanel.setBorder(BorderFactory.createTitledBorder("Java runtime"));
-		javaPanel.add(new JLabel("Install the required Microsoft OpenJDK:"),
-				constraints(0, 0, 1, 0, GridBagConstraints.HORIZONTAL));
-		GridBagConstraints buttonConstraints = constraints(1, 0, 0, 0, GridBagConstraints.NONE);
-		buttonConstraints.anchor = GridBagConstraints.EAST;
-		javaPanel.add(installJava, buttonConstraints);
+		JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+		toolbar.add(new JLabel("Install the required Microsoft OpenJDK:"));
+		toolbar.add(Box.createHorizontalStrut(8));
+		toolbar.add(installJava);
+		javaPanel.add(toolbar, constraints(0, 0, 1, 0, GridBagConstraints.HORIZONTAL));
 		return javaPanel;
+	}
+
+	static void addInstallerSections(Container pane, JPanel installationPanel, JPanel destinationPanel,
+			JPanel javaPanel, JPanel launcherAppsPanel, JPanel activityPanel) {
+		pane.add(installationPanel, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
+		pane.add(destinationPanel, constraints(0, 3, 1, 0, GridBagConstraints.HORIZONTAL));
+		pane.add(javaPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
+		pane.add(launcherAppsPanel, constraints(0, 5, 1, 0, GridBagConstraints.HORIZONTAL));
+		pane.add(activityPanel, constraints(0, 6, 1, 1, GridBagConstraints.BOTH));
 	}
 
 	static JPanel createActivityPanel(JTextArea status, JLabel completion, StatusBox statusBox) {
@@ -1413,8 +1418,8 @@ public final class WrapperInstaller {
 	static final class StatusBox extends JPanel {
 		enum State { IDLE, SUCCESS, FAILURE, IN_PROGRESS, UNVERIFIED }
 
-		private final JLabel label = new JLabel("Ready");
-		private final JPanel indicator = new JPanel();
+		private final JLabel label = new JLabel("Ready for action");
+		private final StatusIndicator indicator = new StatusIndicator();
 		private final javax.swing.Timer resetTimer;
 		private JButton[] operationButtons = new JButton[0];
 		private State state = State.IDLE;
@@ -1428,7 +1433,6 @@ public final class WrapperInstaller {
 			resetTimer.setRepeats(false);
 			setLayout(new GridBagLayout());
 			setBorder(BorderFactory.createTitledBorder("Status"));
-			indicator.setPreferredSize(new Dimension(16, 16));
 			label.setFont(label.getFont().deriveFont(Font.PLAIN));
 			add(indicator, constraints(0, 0, 0, 0, GridBagConstraints.NONE));
 			add(label, constraints(1, 0, 1, 0, GridBagConstraints.HORIZONTAL));
@@ -1485,21 +1489,94 @@ public final class WrapperInstaller {
 
 		void setState(State state) {
 			this.state = state;
-			Color color = switch (state) {
-				case IDLE -> Color.GRAY;
-				case SUCCESS -> Color.GREEN;
-				case FAILURE -> Color.RED;
-				case IN_PROGRESS -> Color.ORANGE;
-				case UNVERIFIED -> new Color(90, 130, 170);
-			};
 			label.setText(switch (state) {
-				case IDLE -> "Idle";
+				case IDLE -> "Ready for action";
 				case SUCCESS -> "Success";
 				case FAILURE -> "Failure";
 				case IN_PROGRESS -> "In progress";
 				case UNVERIFIED -> "Not verified";
 			});
-			indicator.setBackground(color);
+			indicator.setState(state);
+		}
+	}
+
+	static final class StatusIndicator extends JComponent {
+		private static final Color IDLE_COLOR = new Color(65, 150, 230);
+		private static final Color SUCCESS_COLOR = new Color(45, 155, 75);
+		private static final Color FAILURE_COLOR = new Color(210, 55, 55);
+		private static final Color IN_PROGRESS_COLOR = new Color(220, 145, 25);
+		private static final Color UNVERIFIED_COLOR = new Color(90, 130, 170);
+		private StatusBox.State state = StatusBox.State.IDLE;
+
+		StatusIndicator() {
+			setPreferredSize(new Dimension(16, 16));
+			setMinimumSize(new Dimension(16, 16));
+			setToolTipText("Ready for action");
+		}
+
+		void setState(StatusBox.State state) {
+			this.state = state;
+			String description = switch (state) {
+				case IDLE -> "Ready for action";
+				case SUCCESS -> "Installation succeeded";
+				case FAILURE -> "Installation failed";
+				case IN_PROGRESS -> "Installation in progress";
+				case UNVERIFIED -> "Installation completion not verified";
+			};
+			setToolTipText(description);
+			repaint();
+		}
+
+		@Override
+		protected void paintComponent(Graphics graphics) {
+			Graphics2D graphics2D = (Graphics2D) graphics.create();
+			try {
+				graphics2D.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				int diameter = Math.min(getWidth(), getHeight()) - 4;
+				int x = (getWidth() - diameter) / 2;
+				int y = (getHeight() - diameter) / 2;
+				int centerX = getWidth() / 2;
+				int centerY = getHeight() / 2;
+				Color color = switch (state) {
+					case IDLE -> IDLE_COLOR;
+					case SUCCESS -> SUCCESS_COLOR;
+					case FAILURE -> FAILURE_COLOR;
+					case IN_PROGRESS -> IN_PROGRESS_COLOR;
+					case UNVERIFIED -> UNVERIFIED_COLOR;
+				};
+				if (state == StatusBox.State.IDLE) {
+					graphics2D.setColor(color);
+					graphics2D.setStroke(new BasicStroke(2f));
+					graphics2D.drawOval(x, y, diameter, diameter);
+					int[] xPoints = {centerX - 2, centerX - 2, centerX + 4};
+					int[] yPoints = {centerY - 4, centerY + 4, centerY};
+					graphics2D.fillPolygon(xPoints, yPoints, xPoints.length);
+					return;
+				}
+
+				graphics2D.setColor(color);
+				graphics2D.fillOval(x, y, diameter, diameter);
+				graphics2D.setColor(Color.WHITE);
+				graphics2D.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+				switch (state) {
+					case SUCCESS -> {
+						graphics2D.drawLine(centerX - 3, centerY, centerX - 1, centerY + 2);
+						graphics2D.drawLine(centerX - 1, centerY + 2, centerX + 4, centerY - 3);
+					}
+					case FAILURE -> {
+						graphics2D.drawLine(centerX - 3, centerY - 3, centerX + 3, centerY + 3);
+						graphics2D.drawLine(centerX - 3, centerY + 3, centerX + 3, centerY - 3);
+					}
+					case IN_PROGRESS -> graphics2D.drawArc(centerX - 4, centerY - 4, 8, 8, 30, 260);
+					case UNVERIFIED -> {
+						graphics2D.drawLine(centerX, centerY - 1, centerX, centerY + 4);
+						graphics2D.fillOval(centerX - 1, centerY - 4, 2, 2);
+					}
+					case IDLE -> throw new AssertionError("Idle icon should be outlined");
+				}
+			} finally {
+				graphics2D.dispose();
+			}
 		}
 	}
 
