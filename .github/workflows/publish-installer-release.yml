@@ -104,18 +104,6 @@ jobs:
           overwrite_files: true
           fail_on_unmatched_files: true
 
-      - name: Send Discord final notification
-        if: always()
-        uses: neoforged/action-webhooks@v1
-        continue-on-error: true
-        with:
-          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
-          status: ${{ job.status }}
-          version: ${{ steps.release_version.outputs.version || 'unknown' }}
-          include_commit_message: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   package-windows:
     needs: release
     runs-on: windows-latest
@@ -132,6 +120,20 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Install WiX Toolset
+        run: choco install wixtoolset --no-progress --yes
+
+      - name: Add WiX Toolset to PATH
+        shell: pwsh
+        run: |
+          $wix = Get-ChildItem "${env:ProgramFiles(x86)}\WiX Toolset*" -Directory |
+            Sort-Object Name -Descending |
+            Select-Object -First 1
+          if (-not $wix) {
+            throw "WiX Toolset installation was not found."
+          }
+          "$($wix.FullName)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Build versioned installer JAR
         run: .\gradlew.bat clean shadowJar "-PreleaseVersion=${{ needs.release.outputs.version }}"
@@ -162,13 +164,54 @@ jobs:
           if (-not (Test-Path $launcher) -or -not (Test-Path $runtime)) {
             throw "The portable app image is missing its launcher or bundled Java runtime."
           }
+
+          jpackage `
+            --type msi `
+            --input $inputDirectory `
+            --dest $outputDirectory `
+            --name AutoModpackInstaller `
+            --main-jar "legacyinstaller-$version-fatjar.jar" `
+            --main-class net.minecraftforge.installer.WrapperInstaller `
+            --app-version $appVersion `
+            --vendor "AutoModpack" `
+            --win-menu `
+            --win-shortcut
+
+          $generatedMsi = Join-Path $outputDirectory "AutoModpackInstaller-$appVersion.msi"
+          if (-not (Test-Path $generatedMsi)) {
+            throw "The Windows MSI installer was not created."
+          }
+          $releaseMsi = Join-Path $outputDirectory "AutoModpackInstaller-$version.msi"
+          if ($generatedMsi -ne $releaseMsi) {
+            Move-Item $generatedMsi $releaseMsi -Force
+          }
+
           $archive = Join-Path $outputDirectory "AutoModpackInstaller-$version-windows-x64.zip"
           Compress-Archive -Path "$appImage\*" -DestinationPath $archive -Force
 
-      - name: Add portable Windows app to GitHub release
+      - name: Add Windows packages to GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.release.outputs.version }}
-          files: build/jpackage/AutoModpackInstaller-${{ needs.release.outputs.version }}-windows-x64.zip
+          files: |
+            build/jpackage/AutoModpackInstaller-${{ needs.release.outputs.version }}-windows-x64.zip
+            build/jpackage/AutoModpackInstaller-${{ needs.release.outputs.version }}.msi
           overwrite_files: true
           fail_on_unmatched_files: true
+
+  notify:
+    needs: [release, package-windows]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Discord final notification
+        uses: neoforged/action-webhooks@v1
+        continue-on-error: true
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          status: ${{ needs.release.result == 'success' && needs.package-windows.result == 'success' && 'success' || 'failure' }}
+          version: ${{ needs.release.outputs.version || 'unknown' }}
+          include_commit_message: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
