@@ -2,17 +2,21 @@ package net.minecraftforge.installer;
 
 import java.awt.*;
 import javax.swing.*;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -53,6 +57,38 @@ public final class WrapperInstaller {
         String downloadUrl() {
             return downloadUrl;
         }
+    }
+
+    enum InstallerLaunchType {
+        PROCESS_EXITED, OPENED_UNMONITORED
+    }
+
+    static final class InstallerLaunchResult {
+        private final InstallerLaunchType type;
+        private final int exitCode;
+
+        private InstallerLaunchResult(InstallerLaunchType type, int exitCode) {
+            this.type = type;
+            this.exitCode = exitCode;
+        }
+
+        InstallerLaunchType type() {
+            return type;
+        }
+
+        int exitCode() {
+            return exitCode;
+        }
+    }
+
+    @FunctionalInterface
+    interface InstallerProcessStarter {
+        Process start(Path installer) throws IOException;
+    }
+
+    @FunctionalInterface
+    interface InstallerDesktopOpener {
+        void open(Path installer) throws IOException;
     }
 
     private WrapperInstaller() {
@@ -202,7 +238,7 @@ public final class WrapperInstaller {
 		frame.setVisible(true);
 	}
 
-	private JMenuBar createMenuBar(JFrame frame) {
+	static JMenuBar createMenuBar(JFrame frame) {
 		JMenuBar menuBar = new JMenuBar();
 		menuBar.setLayout(new FlowLayout(FlowLayout.LEFT, 0, 0));
 
@@ -238,12 +274,12 @@ public final class WrapperInstaller {
 		return menuBar;
 	}
 
-	private void configureTopLevelMenu(JMenu menu) {
+	private static void configureTopLevelMenu(JMenu menu) {
 		menu.setHorizontalAlignment(SwingConstants.CENTER);
 		menu.setMargin(new Insets(2, 12, 2, 12));
 	}
 
-	private void addThemeItem(JMenu menu, ButtonGroup themes, String label, Theme theme,
+	private static void addThemeItem(JMenu menu, ButtonGroup themes, String label, Theme theme,
 			JFrame frame, boolean selected) {
 		JRadioButtonMenuItem item = new JRadioButtonMenuItem(label, selected);
 		item.addActionListener(event -> applyTheme(frame, theme));
@@ -267,13 +303,17 @@ public final class WrapperInstaller {
 	}
 
 	private void installLauncherApp(JFrame frame, LauncherApp app,
-			JTextArea status, JLabel completion) {
+			JTextArea status, JLabel completion, StatusBox statusBox) {
+		statusBox.beginOperation();
 		status.append("Downloading the official standalone " + app.displayName() + " installer...\n");
 		completion.setText("Downloading " + app.displayName() + " installer");
-		new SwingWorker<Path, String>() {
+		completion.setForeground(new Color(180, 110, 0));
+		new SwingWorker<InstallerLaunchResult, String>() {
 			@Override
-			protected Path doInBackground() throws Exception {
-				return downloadLauncherInstaller(app, this::publish);
+			protected InstallerLaunchResult doInBackground() throws Exception {
+				Path installer = downloadLauncherInstaller(app, this::publish);
+				publish("Starting " + app.displayName() + " installer...");
+				return launchInstaller(installer, this::publish);
 			}
 
 			@Override
@@ -284,11 +324,25 @@ public final class WrapperInstaller {
 			@Override
 			protected void done() {
 				try {
-					Path installer = get();
-					launchInstaller(installer);
-					status.append("Installer started: " + installer + "\n");
-					completion.setText(app.displayName() + " installer started");
-					completion.setForeground(new Color(0, 128, 0));
+					InstallerLaunchResult result = get();
+					StatusBox.State outcome = launcherInstallStatus(result);
+					if (outcome == StatusBox.State.FAILURE) {
+						String message = app.displayName() + " installer exited with code " + result.exitCode();
+						status.append(message + "\n");
+						completion.setText(app.displayName() + " installer failed");
+						completion.setForeground(Color.RED);
+						statusBox.finishOperation(outcome);
+						JOptionPane.showMessageDialog(frame, message,
+								app.displayName() + " installation", JOptionPane.ERROR_MESSAGE);
+					} else {
+						String message = launcherInstallMessage(app, result);
+						status.append(message + "\n");
+						completion.setText(result.type() == InstallerLaunchType.PROCESS_EXITED
+								? app.displayName() + " installer exited; installation unverified"
+								: app.displayName() + " installer opened; completion unmonitored");
+						completion.setForeground(new Color(180, 110, 0));
+						statusBox.finishOperation(outcome);
+					}
 				} catch (Exception exception) {
 					Throwable cause = exception.getCause() == null ? exception : exception.getCause();
 					String message = cause.getMessage() == null || cause.getMessage().isBlank()
@@ -296,11 +350,92 @@ public final class WrapperInstaller {
 					status.append("Could not install " + app.displayName() + ": " + message + "\n");
 					completion.setText(app.displayName() + " installation failed");
 					completion.setForeground(Color.RED);
+					statusBox.finishOperation(StatusBox.State.FAILURE);
 					JOptionPane.showMessageDialog(frame, message,
 							app.displayName() + " installation", JOptionPane.ERROR_MESSAGE);
 				}
 			}
 		}.execute();
+	}
+
+	static InstallerLaunchResult launchInstaller(Path installer, Consumer<String> output)
+			throws IOException, InterruptedException {
+		boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+		return launchInstaller(installer, windows,
+				path -> new ProcessBuilder(path.toString()).redirectErrorStream(true).start(),
+				path -> {
+					if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+						Desktop.getDesktop().open(path.toFile());
+					} else {
+						throw new IOException("This computer cannot start the downloaded installer automatically");
+					}
+				}, output);
+	}
+
+	static InstallerLaunchResult launchInstaller(Path installer, boolean windows,
+			InstallerProcessStarter processStarter, InstallerDesktopOpener desktopOpener,
+			Consumer<String> output) throws IOException, InterruptedException {
+		if (!windows) {
+			desktopOpener.open(installer);
+			return new InstallerLaunchResult(InstallerLaunchType.OPENED_UNMONITORED, -1);
+		}
+		int exitCode = monitorInstallerProcess(processStarter.start(installer), output);
+		return new InstallerLaunchResult(InstallerLaunchType.PROCESS_EXITED, exitCode);
+	}
+
+	static int monitorInstallerProcess(Process process, Consumer<String> output) throws IOException, InterruptedException {
+		InputStream processOutput = process.getInputStream();
+		AtomicBoolean forcedOutputClose = new AtomicBoolean();
+		Thread outputReader = new Thread(() -> {
+			try (BufferedReader reader = new BufferedReader(
+					new InputStreamReader(processOutput, StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = reader.readLine()) != null) {
+					output.accept(line);
+				}
+			} catch (IOException exception) {
+				if (!forcedOutputClose.get()) {
+					output.accept("Could not read installer output: " + exception.getMessage());
+				}
+			}
+		}, "launcher-installer-output");
+		outputReader.setDaemon(true);
+		outputReader.start();
+
+		int exitCode;
+		try {
+			exitCode = process.waitFor();
+		} catch (InterruptedException exception) {
+			process.destroy();
+			forcedOutputClose.set(true);
+			try {
+				processOutput.close();
+			} catch (IOException closeException) {
+				exception.addSuppressed(closeException);
+			}
+			outputReader.interrupt();
+			throw exception;
+		}
+		outputReader.join(1000);
+		if (outputReader.isAlive()) {
+			forcedOutputClose.set(true);
+			processOutput.close();
+			outputReader.join(1000);
+		}
+		return exitCode;
+	}
+
+	static StatusBox.State launcherInstallStatus(InstallerLaunchResult result) {
+		return result.type() == InstallerLaunchType.PROCESS_EXITED && result.exitCode() != 0
+				? StatusBox.State.FAILURE : StatusBox.State.UNVERIFIED;
+	}
+
+	static String launcherInstallMessage(LauncherApp app, InstallerLaunchResult result) {
+		if (result.type() == InstallerLaunchType.PROCESS_EXITED) {
+			return app.displayName() + " installer process exited with code " + result.exitCode()
+					+ "; application installation could not be verified automatically.";
+		}
+		return app.displayName() + " installer was opened; installation completion cannot be monitored on this platform.";
 	}
 
 	static Path downloadLauncherInstaller(LauncherApp app, Consumer<String> output) throws IOException {
@@ -450,21 +585,10 @@ public final class WrapperInstaller {
 		}
 	}
 
-	private static void launchInstaller(Path installer) throws IOException {
-		if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
-			new ProcessBuilder(installer.toString()).start();
-		} else if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-			Desktop.getDesktop().open(installer.toFile());
-		} else {
-			throw new IOException("This computer cannot start the downloaded installer automatically");
-		}
-	}
 
-	private void applyTheme(JFrame frame, Theme theme) {
+	private static void applyTheme(JFrame frame, Theme theme) {
 		try {
-			applyThemeDefaults(theme);
-			SwingUtilities.updateComponentTreeUI(frame);
-			applyComponentThemeRecursively(frame, theme);
+			applyComponentTheme(frame, theme);
 			frame.pack();
 			frame.repaint();
 		} catch (Exception exception) {
@@ -473,8 +597,13 @@ public final class WrapperInstaller {
 	}
 
 	static void applyComponentTheme(Component component) {
-		applyThemeDefaults(Theme.LIGHT);
-		applyComponentThemeRecursively(component, Theme.LIGHT);
+		applyComponentTheme(component, Theme.LIGHT);
+	}
+
+	static void applyComponentTheme(Component component, Theme theme) {
+		applyThemeDefaults(theme);
+		SwingUtilities.updateComponentTreeUI(component);
+		applyComponentThemeRecursively(component, theme);
 	}
 
 	private static void applyComponentThemeRecursively(Component component, Theme theme) {
@@ -518,7 +647,11 @@ public final class WrapperInstaller {
 		} else if (component instanceof JTextField || component instanceof JScrollPane) {
 			((JComponent) component).setBorder(flatControlBorder(theme));
 		}
-		if (component instanceof Container container) {
+		if (component instanceof JMenu menu) {
+			JPopupMenu popup = menu.getPopupMenu();
+			SwingUtilities.updateComponentTreeUI(popup);
+			applyComponentThemeRecursively(popup, theme);
+		} else if (component instanceof Container container) {
 			for (Component child : container.getComponents()) {
 				applyComponentThemeRecursively(child, theme);
 			}
@@ -833,6 +966,10 @@ public final class WrapperInstaller {
 		UIManager.put("MenuBar.foreground", foreground);
 		UIManager.put("Menu.background", background);
 		UIManager.put("Menu.foreground", foreground);
+		UIManager.put("Menu.selectionBackground", selectionBackground);
+		UIManager.put("Menu.selectionForeground", selectionForeground);
+		UIManager.put("PopupMenu.background", background);
+		UIManager.put("PopupMenu.foreground", foreground);
 		UIManager.put("MenuItem.background", background);
 		UIManager.put("MenuItem.foreground", foreground);
 		UIManager.put("MenuItem.selectionBackground", selectionBackground);
@@ -926,11 +1063,7 @@ public final class WrapperInstaller {
 		installationPanel.add(versions, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
 		panel.add(installationPanel, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
 
-        JPanel javaPanel = new JPanel(new BorderLayout(10, 0));
-        javaPanel.setBorder(BorderFactory.createTitledBorder("Java runtime"));
-        javaPanel.add(new JLabel("Install the required Microsoft OpenJDK:"),
-                BorderLayout.CENTER);
-        javaPanel.add(installJava, BorderLayout.EAST);
+        JPanel javaPanel = createJavaRuntimePanel(installJava);
         panel.add(javaPanel, constraints(0, 3, 1, 0, GridBagConstraints.HORIZONTAL));
 
 		JPanel launcherAppsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
@@ -969,13 +1102,9 @@ public final class WrapperInstaller {
 		destinationPanel.add(directoryPanel, constraints(0, 4, 1, 0, GridBagConstraints.HORIZONTAL));
 		panel.add(destinationPanel, constraints(0, 5, 1, 0, GridBagConstraints.HORIZONTAL));
 
-		JPanel activityPanel = new JPanel(new BorderLayout(0, 6));
-		activityPanel.setBorder(BorderFactory.createTitledBorder("Activity"));
-		activityPanel.add(new JScrollPane(status), BorderLayout.CENTER);
-
 		StatusBox statusBox = new StatusBox();
-		activityPanel.add(statusBox, BorderLayout.SOUTH);
-		activityPanel.add(completion, BorderLayout.NORTH);
+		statusBox.setOperationButtons(install, installJava, installCurseForge, installModrinth);
+		JPanel activityPanel = createActivityPanel(status, completion, statusBox);
 		panel.add(activityPanel, constraints(0, 6, 1, 1, GridBagConstraints.BOTH));
 		profilePanel.setVisible(false);
 		profilesLocationPanel.setVisible(false);
@@ -1052,9 +1181,9 @@ public final class WrapperInstaller {
 			}
 		});
 		installCurseForge.addActionListener(event ->
-				installLauncherApp(frame, LauncherApp.CURSEFORGE, status, completion));
+				installLauncherApp(frame, LauncherApp.CURSEFORGE, status, completion, statusBox));
 		installModrinth.addActionListener(event ->
-				installLauncherApp(frame, LauncherApp.MODRINTH, status, completion));
+				installLauncherApp(frame, LauncherApp.MODRINTH, status, completion, statusBox));
 		browse.addActionListener(event -> {
 			JFileChooser chooser = new JFileChooser(target[0]);
 			chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
@@ -1067,7 +1196,7 @@ public final class WrapperInstaller {
 				targetMode.setSelectedIndex(0);
 			}
 		});
-  installJava.addActionListener(event -> startJavaInstallation(frame, installJava, status, completion, statusBox));
+  installJava.addActionListener(event -> startJavaInstallation(frame, status, completion, statusBox));
   install.addActionListener(event -> {
             if (targetMode.getSelectedIndex() == 1 && profiles.getSelectedItem() == null) {
 				completion.setText("Profile required");
@@ -1076,10 +1205,30 @@ public final class WrapperInstaller {
 				return;
 			}
          			startInstallation(frame, versions, action, target[0], targetMode.getSelectedIndex() == 1,
-     status, completion, install, statusBox);
+     status, completion, statusBox);
         });
 		loadVersions(versions, status);
 		return panel;
+	}
+
+	static JPanel createJavaRuntimePanel(JButton installJava) {
+		JPanel javaPanel = new JPanel(new GridBagLayout());
+		javaPanel.setBorder(BorderFactory.createTitledBorder("Java runtime"));
+		javaPanel.add(new JLabel("Install the required Microsoft OpenJDK:"),
+				constraints(0, 0, 1, 0, GridBagConstraints.HORIZONTAL));
+		GridBagConstraints buttonConstraints = constraints(1, 0, 0, 0, GridBagConstraints.NONE);
+		buttonConstraints.anchor = GridBagConstraints.EAST;
+		javaPanel.add(installJava, buttonConstraints);
+		return javaPanel;
+	}
+
+	static JPanel createActivityPanel(JTextArea status, JLabel completion, StatusBox statusBox) {
+		JPanel activityPanel = new JPanel(new GridBagLayout());
+		activityPanel.setBorder(BorderFactory.createTitledBorder("Activity"));
+		activityPanel.add(completion, constraints(0, 0, 1, 0, GridBagConstraints.HORIZONTAL));
+		activityPanel.add(new JScrollPane(status), constraints(0, 1, 1, 1, GridBagConstraints.BOTH));
+		activityPanel.add(statusBox, constraints(0, 2, 1, 0, GridBagConstraints.HORIZONTAL));
+		return activityPanel;
 	}
 
 	static void makeBackgroundFocusable(JPanel panel) {
@@ -1105,6 +1254,7 @@ public final class WrapperInstaller {
 	}
 
 	private static void loadVersions(JComboBox<String> versions, JTextArea status) {
+		String initialStatus = status.getText();
 		new SwingWorker<List<String>, Void>() {
 			@Override
 			protected List<String> doInBackground() throws Exception {
@@ -1118,21 +1268,27 @@ public final class WrapperInstaller {
 					for (String version : get()) {
 						versions.addItem(version);
 					}
-					status.setText("Select an action and destination, then download the official installer.\n");
+					if (status.getText().equals(initialStatus)) {
+						status.setText("Select an action and destination, then download the official installer.\n");
+					}
 				} catch (Exception exception) {
 					versions.removeAllItems();
-					status.setText("Could not load NeoForge versions: " + exception.getMessage());
+					String message = "Could not load NeoForge versions: " + exception.getMessage() + "\n";
+					if (status.getText().equals(initialStatus)) {
+						status.setText(message);
+					} else {
+						status.append(message);
+					}
 				}
 			}
 		}.execute();
 	}
 
- private static void startJavaInstallation(JFrame frame, JButton installJava, JTextArea status, JLabel completion,
+ private static void startJavaInstallation(JFrame frame, JTextArea status, JLabel completion,
             StatusBox statusBox) {
-        installJava.setEnabled(false);
+        statusBox.beginOperation();
         completion.setText("Installing Java...");
         completion.setForeground(new Color(180, 110, 0));
-        statusBox.setState(StatusBox.State.IN_PROGRESS);
         status.setText("Installing Microsoft OpenJDK " + JavaRuntimeManager.recommendedMajor() + " with Jabba...\n");
         new SwingWorker<Void, String>() {
             @Override
@@ -1148,7 +1304,6 @@ public final class WrapperInstaller {
 
             @Override
             protected void done() {
-                installJava.setEnabled(true);
                 frame.revalidate();
                 frame.repaint();
                 try {
@@ -1156,7 +1311,7 @@ public final class WrapperInstaller {
                     status.append("Java installation completed successfully.\n");
                     completion.setText("Java installation complete");
                     completion.setForeground(new Color(0, 128, 0));
-                    statusBox.setState(StatusBox.State.SUCCESS);
+                    statusBox.finishOperation(StatusBox.State.SUCCESS);
                 } catch (Exception exception) {
                     Throwable failure = exception instanceof ExecutionException && exception.getCause() != null
                             ? exception.getCause() : exception;
@@ -1165,7 +1320,7 @@ public final class WrapperInstaller {
                     status.append("Java installation failed: " + message + "\n");
                     completion.setText("Java installation failed");
                     completion.setForeground(Color.RED);
-                    statusBox.setState(StatusBox.State.FAILURE);
+                    statusBox.finishOperation(StatusBox.State.FAILURE);
                     JOptionPane.showMessageDialog(frame, message, "Java installation failed", JOptionPane.ERROR_MESSAGE);
                 }
             }
@@ -1174,7 +1329,7 @@ public final class WrapperInstaller {
 
  private static void startInstallation(JFrame frame, JComboBox<String> versions, JComboBox<String> action,
             File target, boolean launcherProfile, JTextArea status, JLabel completion,
-            JButton install, StatusBox statusBox) {
+            StatusBox statusBox) {
         String version = (String) versions.getSelectedItem();
         if (!launcherProfile && (version == null || version.startsWith("Loading"))) {
             return;
@@ -1184,10 +1339,9 @@ public final class WrapperInstaller {
 			case "Fat installer" -> "--fat-installer";
 			default -> "--installClient";
 		};
-		install.setEnabled(false);
+		statusBox.beginOperation();
 		completion.setText("Installing...");
 		completion.setForeground(new Color(180, 110, 0));
-		statusBox.setState(StatusBox.State.IN_PROGRESS);
   status.setText(launcherProfile
           ? "Reading the selected profile and preparing AutoModpack...\n"
           : "Downloading official NeoForge " + version + " installer...\n");
@@ -1227,20 +1381,19 @@ public final class WrapperInstaller {
 
 			@Override
 			protected void done() {
-				install.setEnabled(true);
 				try {
 					int result = get();
 					if (result == 0) {
 						status.append("Installation completed successfully.\n");
 						completion.setText("Installation complete");
 						completion.setForeground(new Color(0, 128, 0));
-						statusBox.setState(StatusBox.State.SUCCESS);
+						statusBox.finishOperation(StatusBox.State.SUCCESS);
 					} else {
 						status.append("The official installer did not complete (exit code " + result
 								+ "). No successful installation was reported.\n");
 						completion.setText("Installation failed (exit code " + result + ")");
 						completion.setForeground(Color.RED);
-						statusBox.setState(StatusBox.State.FAILURE);
+						statusBox.finishOperation(StatusBox.State.FAILURE);
 					}
 				} catch (Exception exception) {
 					Throwable failure = exception instanceof ExecutionException && exception.getCause() != null
@@ -1250,7 +1403,7 @@ public final class WrapperInstaller {
 					status.append("Installation failed: " + message + "\n");
 					completion.setText("Installation failed");
 					completion.setForeground(Color.RED);
-					statusBox.setState(StatusBox.State.FAILURE);
+					statusBox.finishOperation(StatusBox.State.FAILURE);
 					JOptionPane.showMessageDialog(frame, message, "Installation failed", JOptionPane.ERROR_MESSAGE);
 				}
 			}
@@ -1258,13 +1411,21 @@ public final class WrapperInstaller {
 	}
 
 	static final class StatusBox extends JPanel {
-		enum State { IDLE, SUCCESS, FAILURE, IN_PROGRESS }
+		enum State { IDLE, SUCCESS, FAILURE, IN_PROGRESS, UNVERIFIED }
 
 		private final JLabel label = new JLabel("Ready");
 		private final JPanel indicator = new JPanel();
+		private final javax.swing.Timer resetTimer;
+		private JButton[] operationButtons = new JButton[0];
 		private State state = State.IDLE;
 
 		StatusBox() {
+			this(5000);
+		}
+
+		StatusBox(int resetDelayMillis) {
+			resetTimer = new javax.swing.Timer(resetDelayMillis, event -> resetCompletedOperation());
+			resetTimer.setRepeats(false);
 			setLayout(new GridBagLayout());
 			setBorder(BorderFactory.createTitledBorder("Status"));
 			indicator.setPreferredSize(new Dimension(16, 16));
@@ -1272,6 +1433,36 @@ public final class WrapperInstaller {
 			add(indicator, constraints(0, 0, 0, 0, GridBagConstraints.NONE));
 			add(label, constraints(1, 0, 1, 0, GridBagConstraints.HORIZONTAL));
 			setState(State.IDLE);
+		}
+
+		void setOperationButtons(JButton... buttons) {
+			operationButtons = buttons.clone();
+		}
+
+		void beginOperation() {
+			resetTimer.stop();
+			for (JButton button : operationButtons) {
+				button.setEnabled(false);
+			}
+			setState(State.IN_PROGRESS);
+		}
+
+		void finishOperation(State result) {
+			if (result != State.SUCCESS && result != State.FAILURE && result != State.UNVERIFIED) {
+				throw new IllegalArgumentException("An operation must finish with a completed state");
+			}
+			setState(result);
+			for (JButton button : operationButtons) {
+				button.setEnabled(true);
+			}
+			resetTimer.restart();
+		}
+
+		void resetCompletedOperation() {
+			if (state == State.SUCCESS || state == State.FAILURE || state == State.UNVERIFIED) {
+				resetTimer.stop();
+				setState(State.IDLE);
+			}
 		}
 
 		@Override
@@ -1299,12 +1490,14 @@ public final class WrapperInstaller {
 				case SUCCESS -> Color.GREEN;
 				case FAILURE -> Color.RED;
 				case IN_PROGRESS -> Color.ORANGE;
+				case UNVERIFIED -> new Color(90, 130, 170);
 			};
 			label.setText(switch (state) {
 				case IDLE -> "Idle";
 				case SUCCESS -> "Success";
 				case FAILURE -> "Failure";
 				case IN_PROGRESS -> "In progress";
+				case UNVERIFIED -> "Not verified";
 			});
 			indicator.setBackground(color);
 		}

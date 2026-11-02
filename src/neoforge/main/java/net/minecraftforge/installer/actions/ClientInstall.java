@@ -136,7 +136,7 @@ public class ClientInstall extends Action {
                 String args = (String)value.get(node);
                 value.set(node, args + " --modListFile \"absolute:"+modListFile.getAbsolutePath()+ "\"");
             } catch (Exception e) {
-                // TODO Auto-generated catch block
+
                 e.printStackTrace();
             }
         }

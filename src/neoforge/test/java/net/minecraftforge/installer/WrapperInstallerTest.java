@@ -15,22 +15,40 @@ import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.awt.event.MouseEvent;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.GZIPOutputStream;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JLabel;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
 import javax.swing.JList;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JScrollPane;
+import javax.swing.SwingUtilities;
+import javax.swing.JTextArea;
 import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicComboBoxUI;
 import javax.swing.border.Border;
@@ -38,6 +56,73 @@ import javax.swing.border.CompoundBorder;
 import javax.swing.border.LineBorder;
 
 class WrapperInstallerTest {
+    private static final class FakeProcess extends Process {
+        private final PipedInputStream processOutput = new PipedInputStream();
+        private final PipedOutputStream output;
+        private final CountDownLatch exited = new CountDownLatch(1);
+        private volatile int exitCode;
+        private boolean finished;
+
+        private FakeProcess() throws IOException {
+            output = new PipedOutputStream(processOutput);
+        }
+
+        synchronized void writeOutput(String text) throws IOException {
+            output.write(text.getBytes(StandardCharsets.UTF_8));
+            output.flush();
+        }
+
+        synchronized void finish(int result) throws IOException {
+            if (!finished) {
+                finished = true;
+                exitCode = result;
+                try {
+                    output.close();
+                } finally {
+                    exited.countDown();
+                }
+            }
+        }
+
+        @Override
+        public OutputStream getOutputStream() {
+            return new ByteArrayOutputStream();
+        }
+
+        @Override
+        public PipedInputStream getInputStream() {
+            return processOutput;
+        }
+
+        @Override
+        public ByteArrayInputStream getErrorStream() {
+            return new ByteArrayInputStream(new byte[0]);
+        }
+
+        @Override
+        public int waitFor() throws InterruptedException {
+            exited.await();
+            return exitCode;
+        }
+
+        @Override
+        public int exitValue() {
+            if (exited.getCount() != 0) {
+                throw new IllegalThreadStateException("Process has not exited");
+            }
+            return exitCode;
+        }
+
+        @Override
+        public void destroy() {
+            try {
+                finish(1);
+            } catch (IOException exception) {
+                throw new RuntimeException(exception);
+            }
+        }
+    }
+
     @Test
     void mapsNeoForgeVersionToMinecraftVersion() {
         assertEquals("1.21.1", WrapperInstaller.minecraftVersion("1.21.1-2.0.0"));
@@ -95,6 +180,47 @@ class WrapperInstallerTest {
     }
 
     @Test
+    void themesSettingsAndNestedMenusAcrossThemeChanges() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            JMenuBar menuBar = WrapperInstaller.createMenuBar(null);
+            JMenu settings = menuBar.getMenu(1);
+            JMenu appearance = (JMenu) settings.getPopupMenu().getComponent(0);
+            JMenu help = menuBar.getMenu(2);
+            JPopupMenu settingsPopup = settings.getPopupMenu();
+            JPopupMenu appearancePopup = appearance.getPopupMenu();
+            JPopupMenu helpPopup = help.getPopupMenu();
+            JMenuItem light = (JMenuItem) appearancePopup.getComponent(0);
+            JMenuItem dark = (JMenuItem) appearancePopup.getComponent(1);
+
+            for (WrapperInstaller.Theme theme : new WrapperInstaller.Theme[] {
+                    WrapperInstaller.Theme.DARK, WrapperInstaller.Theme.LIGHT, WrapperInstaller.Theme.DARK}) {
+                WrapperInstaller.applyComponentTheme(menuBar, theme);
+                Color background = theme == WrapperInstaller.Theme.DARK
+                        ? new Color(43, 43, 43) : Color.WHITE;
+                Color foreground = theme == WrapperInstaller.Theme.DARK
+                        ? new Color(235, 235, 235) : Color.BLACK;
+                Color selectionBackground = theme == WrapperInstaller.Theme.DARK
+                        ? new Color(90, 105, 120) : new Color(184, 207, 229);
+                Color selectionForeground = theme == WrapperInstaller.Theme.DARK ? Color.WHITE : Color.BLACK;
+
+                assertEquals(background, settingsPopup.getBackground());
+                assertEquals(foreground, settingsPopup.getForeground());
+                assertEquals(background, appearancePopup.getBackground());
+                assertEquals(foreground, appearancePopup.getForeground());
+                assertEquals(background, helpPopup.getBackground());
+                assertEquals(foreground, light.getForeground());
+                assertEquals(foreground, dark.getForeground());
+                assertEquals(selectionBackground, UIManager.getColor("Menu.selectionBackground"));
+                assertEquals(selectionForeground, UIManager.getColor("Menu.selectionForeground"));
+                assertEquals(selectionBackground, UIManager.getColor("MenuItem.selectionBackground"));
+                assertEquals(selectionForeground, UIManager.getColor("MenuItem.selectionForeground"));
+                assertEquals(selectionBackground, UIManager.getColor("RadioButtonMenuItem.selectionBackground"));
+                assertEquals(selectionForeground, UIManager.getColor("RadioButtonMenuItem.selectionForeground"));
+            }
+        });
+    }
+
+    @Test
     void providesDirectLauncherInstallerEndpoints() {
         assertEquals("https://download.overwolf.com/install/Download?Name=CurseForge&ExtensionId=cfiahnpaolfnlgaihhmobmnjdafknjnjdpdabpcm",
                 WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.CURSEFORGE));
@@ -118,6 +244,75 @@ class WrapperInstallerTest {
     void exposesModrinthReleaseApiInsteadOfWebsite() {
         assertEquals("https://api.github.com/repos/modrinth/theseus/releases/latest",
                 WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.MODRINTH));
+    }
+
+    @Test
+    void streamsInstallerOutputAndWaitsForTheProcessToExit() throws Exception {
+        FakeProcess process = new FakeProcess();
+        List<String> output = new ArrayList<>();
+        CountDownLatch linesReceived = new CountDownLatch(1);
+        FutureTask<WrapperInstaller.InstallerLaunchResult> launch = new FutureTask<>(() ->
+                WrapperInstaller.launchInstaller(Path.of("installer.exe"), true, ignored -> process,
+                        ignored -> { throw new AssertionError("Desktop opener should not be used"); },
+                        line -> {
+                            output.add(line);
+                            linesReceived.countDown();
+                        }));
+        Thread worker = new Thread(launch);
+        worker.start();
+
+        try {
+            process.writeOutput("Preparing installation...\n");
+            assertTrue(linesReceived.await(5, TimeUnit.SECONDS), "Installer output was not streamed");
+            assertFalse(launch.isDone(), "The operation finished while the installer process was still running");
+
+            process.writeOutput("Writing files...\n");
+            process.finish(0);
+            WrapperInstaller.InstallerLaunchResult result = launch.get(5, TimeUnit.SECONDS);
+
+            assertEquals(List.of("Preparing installation...", "Writing files..."), output);
+            assertEquals(WrapperInstaller.InstallerLaunchType.PROCESS_EXITED, result.type());
+            assertEquals(0, result.exitCode());
+            assertEquals(WrapperInstaller.StatusBox.State.UNVERIFIED,
+                    WrapperInstaller.launcherInstallStatus(result));
+            assertTrue(WrapperInstaller.launcherInstallMessage(WrapperInstaller.LauncherApp.CURSEFORGE, result)
+                    .contains("could not be verified"));
+        } finally {
+            process.finish(0);
+            worker.join(5000);
+        }
+    }
+
+    @Test
+    void reportsNonzeroInstallerExitAsFailure() throws Exception {
+        FakeProcess process = new FakeProcess();
+        process.writeOutput("Installer failed\n");
+        process.finish(23);
+
+        WrapperInstaller.InstallerLaunchResult result = WrapperInstaller.launchInstaller(
+                Path.of("installer.exe"), true, ignored -> process,
+                ignored -> { throw new AssertionError("Desktop opener should not be used"); }, ignored -> { });
+
+        assertEquals(23, result.exitCode());
+        assertEquals(WrapperInstaller.StatusBox.State.FAILURE, WrapperInstaller.launcherInstallStatus(result));
+        assertTrue(WrapperInstaller.launcherInstallMessage(WrapperInstaller.LauncherApp.MODRINTH, result)
+                .contains("code 23"));
+    }
+
+    @Test
+    void reportsDesktopOpenedInstallerAsUnmonitored() throws Exception {
+        java.util.concurrent.atomic.AtomicBoolean opened = new java.util.concurrent.atomic.AtomicBoolean();
+
+        WrapperInstaller.InstallerLaunchResult result = WrapperInstaller.launchInstaller(
+                Path.of("installer.dmg"), false,
+                ignored -> { throw new AssertionError("A process should not be started on this platform"); },
+                ignored -> opened.set(true), ignored -> { });
+
+        assertTrue(opened.get());
+        assertEquals(WrapperInstaller.InstallerLaunchType.OPENED_UNMONITORED, result.type());
+        assertEquals(WrapperInstaller.StatusBox.State.UNVERIFIED, WrapperInstaller.launcherInstallStatus(result));
+        assertTrue(WrapperInstaller.launcherInstallMessage(WrapperInstaller.LauncherApp.MODRINTH, result)
+                .contains("cannot be monitored"));
     }
 
     @Test
@@ -262,6 +457,34 @@ class WrapperInstallerTest {
     }
 
     @Test
+    void alignsJavaRuntimeAndActivityTextAndExpandsActivityLog() throws Exception {
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            for (int width : new int[] {640, 960}) {
+                JPanel javaPanel = WrapperInstaller.createJavaRuntimePanel(new JButton("Install Java"));
+                JLabel javaLabel = (JLabel) javaPanel.getComponent(0);
+                JButton javaButton = (JButton) javaPanel.getComponent(1);
+                JLabel completion = new JLabel("Ready");
+                JPanel activityPanel = WrapperInstaller.createActivityPanel(new JTextArea(), completion,
+                        new WrapperInstaller.StatusBox());
+                JScrollPane activityLog = (JScrollPane) activityPanel.getComponent(1);
+
+                javaPanel.setSize(width, 100);
+                activityPanel.setSize(width, 360);
+                javaPanel.doLayout();
+                activityPanel.doLayout();
+
+                assertEquals(javaLabel.getX(), completion.getX());
+                assertTrue(javaButton.getX() > javaLabel.getX());
+                int initialLogHeight = activityLog.getHeight();
+
+                activityPanel.setSize(width, 560);
+                activityPanel.doLayout();
+                assertTrue(activityLog.getHeight() > initialLogHeight);
+            }
+        });
+    }
+
+    @Test
     void showsDistinctReadableInstallationStates() {
         WrapperInstaller.StatusBox statusBox = new WrapperInstaller.StatusBox();
         javax.swing.JLabel label = (javax.swing.JLabel) statusBox.getComponent(1);
@@ -274,7 +497,65 @@ class WrapperInstallerTest {
         assertEquals("Success", label.getText());
         statusBox.setState(WrapperInstaller.StatusBox.State.FAILURE);
         assertEquals("Failure", label.getText());
+        statusBox.setState(WrapperInstaller.StatusBox.State.UNVERIFIED);
+        assertEquals("Not verified", label.getText());
         assertFalse(label.getFont().isBold());
+    }
+
+    @Test
+    void installationStatusResetsAndNewOperationsCancelTheOldReset() throws Exception {
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            WrapperInstaller.StatusBox statusBox = new WrapperInstaller.StatusBox();
+            JLabel label = (JLabel) statusBox.getComponent(1);
+            JButton java = new JButton("Java");
+            JButton launcher = new JButton("Launcher");
+            statusBox.setOperationButtons(java, launcher);
+
+            statusBox.beginOperation();
+            assertEquals("In progress", label.getText());
+            assertFalse(java.isEnabled());
+            assertFalse(launcher.isEnabled());
+            statusBox.finishOperation(WrapperInstaller.StatusBox.State.SUCCESS);
+            assertEquals("Success", label.getText());
+            assertTrue(java.isEnabled());
+            assertTrue(launcher.isEnabled());
+
+            statusBox.beginOperation();
+            statusBox.resetCompletedOperation();
+            assertEquals("In progress", label.getText());
+            statusBox.finishOperation(WrapperInstaller.StatusBox.State.FAILURE);
+            assertEquals("Failure", label.getText());
+            statusBox.resetCompletedOperation();
+            assertEquals("Idle", label.getText());
+        });
+    }
+
+    @Test
+    void completedStatusAutomaticallyReturnsToIdle() throws Exception {
+        for (WrapperInstaller.StatusBox.State result : new WrapperInstaller.StatusBox.State[] {
+                WrapperInstaller.StatusBox.State.SUCCESS, WrapperInstaller.StatusBox.State.FAILURE,
+                WrapperInstaller.StatusBox.State.UNVERIFIED}) {
+            CountDownLatch idle = new CountDownLatch(1);
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                WrapperInstaller.StatusBox statusBox = new WrapperInstaller.StatusBox(50);
+                JLabel label = (JLabel) statusBox.getComponent(1);
+                label.addPropertyChangeListener("text", event -> {
+                    if ("Idle".equals(event.getNewValue())) {
+                        idle.countDown();
+                    }
+                });
+                statusBox.beginOperation();
+                statusBox.finishOperation(result);
+                String expected = switch (result) {
+                    case SUCCESS -> "Success";
+                    case FAILURE -> "Failure";
+                    case UNVERIFIED -> "Not verified";
+                    default -> throw new AssertionError("Unexpected completed state: " + result);
+                };
+                assertEquals(expected, label.getText());
+            });
+            assertTrue(idle.await(5, TimeUnit.SECONDS), "Status did not return to idle");
+        }
     }
 
     @Test
