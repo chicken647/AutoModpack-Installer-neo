@@ -2,8 +2,10 @@ package net.minecraftforge.installer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
 import java.awt.Color;
@@ -12,7 +14,18 @@ import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.awt.event.MouseEvent;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.zip.GZIPOutputStream;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -77,13 +90,18 @@ class WrapperInstallerTest {
     }
 
     @Test
+    void defaultsToDarkTheme() {
+        assertEquals(WrapperInstaller.Theme.DARK, WrapperInstaller.defaultTheme());
+    }
+
+    @Test
     void providesDirectLauncherInstallerEndpoints() {
-        assertEquals("https://www.curseforge.com/download/app?clientType=standalone",
+        assertEquals("https://download.overwolf.com/install/Download?Name=CurseForge&ExtensionId=cfiahnpaolfnlgaihhmobmnjdafknjnjdpdabpcm",
                 WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.CURSEFORGE));
         assertTrue(WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.MODRINTH)
                 .startsWith("https://api.github.com/repos/modrinth/theseus/releases/latest"));
-        assertFalse(WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.CURSEFORGE)
-                .contains("overwolf"));
+        assertTrue(WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.CURSEFORGE)
+                .startsWith("https://download.overwolf.com/install/Download?"));
         assertFalse(WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.MODRINTH)
                 .contains("modrinth.com/app"));
     }
@@ -100,6 +118,136 @@ class WrapperInstallerTest {
     void exposesModrinthReleaseApiInsteadOfWebsite() {
         assertEquals("https://api.github.com/repos/modrinth/theseus/releases/latest",
                 WrapperInstaller.launcherAppUrl(WrapperInstaller.LauncherApp.MODRINTH));
+    }
+
+    @Test
+    void configuresCurseForgeDownloadAsBrowserRequest() throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL("https://example.test/download").openConnection();
+        WrapperInstaller.configureLauncherDownloadConnection(connection, WrapperInstaller.LauncherApp.CURSEFORGE);
+
+        assertTrue(connection.getRequestProperty("User-Agent").startsWith("Mozilla/5.0"));
+        assertTrue(connection.getRequestProperty("Accept").contains("application/octet-stream"));
+        assertEquals("https://www.curseforge.com/", connection.getRequestProperty("Referer"));
+        assertEquals("identity", connection.getRequestProperty("Accept-Encoding"));
+    }
+
+    @Test
+    void recognizesWindowsPortableExecutableHeaders() throws Exception {
+        Path valid = Files.createTempFile("curseforge-valid", ".exe");
+        Path invalid = Files.createTempFile("curseforge-invalid", ".exe");
+        try {
+            byte[] header = new byte[68];
+            header[0] = 'M';
+            header[1] = 'Z';
+            header[60] = 64;
+            header[64] = 'P';
+            header[65] = 'E';
+            Files.write(valid, header);
+            Files.writeString(invalid, "This is not an executable");
+
+            assertTrue(WrapperInstaller.isWindowsExecutable(valid));
+            assertFalse(WrapperInstaller.isWindowsExecutable(invalid));
+        } finally {
+            Files.deleteIfExists(valid);
+            Files.deleteIfExists(invalid);
+        }
+    }
+
+    @Test
+    void downloadsGzipEncodedCurseForgeExecutable() throws Exception {
+        Path installer = downloadFromResponse(gzip(windowsExecutable()), "gzip");
+        try {
+            assertTrue(WrapperInstaller.isWindowsExecutable(installer));
+        } finally {
+            Files.deleteIfExists(installer);
+        }
+    }
+
+    @Test
+    void downloadsUncompressedCurseForgeExecutable() throws Exception {
+        Path installer = downloadFromResponse(windowsExecutable(), null);
+        try {
+            assertTrue(WrapperInstaller.isWindowsExecutable(installer));
+        } finally {
+            Files.deleteIfExists(installer);
+        }
+    }
+
+    @Test
+    void rejectsMalformedGzipAndCleansTemporaryDownload() throws Exception {
+        IOException failure = assertDownloadFailsAndCleans(new byte[] {1, 2, 3}, "gzip");
+
+        assertFalse(failure.getMessage().contains("not a valid Windows executable"));
+    }
+
+    @Test
+    void rejectsUnsupportedContentEncodingAndCleansTemporaryDownload() throws Exception {
+        IOException failure = assertDownloadFailsAndCleans(windowsExecutable(), "br");
+
+        assertTrue(failure.getMessage().contains("Unsupported HTTP content encoding: br"));
+    }
+
+    @Test
+    void rejectsInvalidExecutableAndCleansTemporaryDownload() throws Exception {
+        IOException failure = assertDownloadFailsAndCleans("not an executable".getBytes(), null);
+
+        assertTrue(failure.getMessage().contains("not a valid Windows executable"));
+    }
+
+    private static IOException assertDownloadFailsAndCleans(byte[] body, String contentEncoding)
+            throws Exception {
+        Set<Path> before = temporaryCurseForgeInstallers();
+        IOException failure = assertThrows(IOException.class,
+                () -> downloadFromResponse(body, contentEncoding));
+
+        assertEquals(before, temporaryCurseForgeInstallers());
+        return failure;
+    }
+
+    private static Path downloadFromResponse(byte[] body, String contentEncoding) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/installer.exe", exchange -> {
+            exchange.getResponseHeaders().set("Content-Type", "application/octet-stream");
+            if (contentEncoding != null) {
+                exchange.getResponseHeaders().set("Content-Encoding", contentEncoding);
+            }
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            URL url = new URL("http://127.0.0.1:" + server.getAddress().getPort() + "/installer.exe");
+            return WrapperInstaller.downloadLauncherInstaller(
+                    WrapperInstaller.LauncherApp.CURSEFORGE, url, ignored -> { });
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private static byte[] windowsExecutable() {
+        byte[] header = new byte[68];
+        header[0] = 'M';
+        header[1] = 'Z';
+        header[60] = 64;
+        header[64] = 'P';
+        header[65] = 'E';
+        return header;
+    }
+
+    private static byte[] gzip(byte[] contents) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(output)) {
+            gzip.write(contents);
+        }
+        return output.toByteArray();
+    }
+
+    private static Set<Path> temporaryCurseForgeInstallers() throws IOException {
+        try (Stream<Path> files = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
+            return files.filter(file -> file.getFileName().toString().startsWith("automodpack-curseforge-"))
+                    .collect(Collectors.toSet());
+        }
     }
 
     @Test
@@ -148,7 +296,7 @@ class WrapperInstallerTest {
     void enablesLightBlueButtonRollover() {
         JButton button = new JButton("Browse");
 
-        WrapperInstaller.applyComponentTheme(button, WrapperInstaller.Theme.LIGHT);
+        WrapperInstaller.applyComponentTheme(button);
 
         assertTrue(button.isRolloverEnabled());
         assertEquals(new Color(184, 207, 229), UIManager.getColor("Button.select"));
@@ -159,7 +307,7 @@ class WrapperInstallerTest {
     void givesButtonsRoundedBeveledBorders() {
         JButton button = new JButton("Browse");
 
-        WrapperInstaller.applyComponentTheme(button, WrapperInstaller.Theme.LIGHT);
+        WrapperInstaller.applyComponentTheme(button);
 
         assertTrue(button.getBorder() instanceof CompoundBorder);
         Border outer = ((CompoundBorder) button.getBorder()).getOutsideBorder();
@@ -173,8 +321,8 @@ class WrapperInstallerTest {
         JButton button = new JButton("Browse");
         JComboBox<String> comboBox = new JComboBox<>(new String[] {"Client", "Server"});
 
-        WrapperInstaller.applyComponentTheme(button, WrapperInstaller.Theme.LIGHT);
-        WrapperInstaller.applyComponentTheme(comboBox, WrapperInstaller.Theme.LIGHT);
+        WrapperInstaller.applyComponentTheme(button);
+        WrapperInstaller.applyComponentTheme(comboBox);
         MouseEvent buttonEvent = new MouseEvent(button, MouseEvent.MOUSE_ENTERED,
                 System.currentTimeMillis(), 0, 4, 4, 0, false);
         MouseEvent comboEvent = new MouseEvent(comboBox, MouseEvent.MOUSE_ENTERED,
@@ -220,7 +368,7 @@ class WrapperInstallerTest {
     void removesDropdownButtonBorderWhileKeepingOuterBorder() {
         JComboBox<String> comboBox = new JComboBox<>(new String[] {"Custom directory"});
 
-        WrapperInstaller.applyComponentTheme(comboBox, WrapperInstaller.Theme.LIGHT);
+        WrapperInstaller.applyComponentTheme(comboBox);
 
         assertTrue(comboBox.getBorder() instanceof CompoundBorder);
         assertTrue(((CompoundBorder) comboBox.getBorder()).getOutsideBorder() instanceof LineBorder);
@@ -238,7 +386,7 @@ class WrapperInstallerTest {
         JComboBox<String> comboBox = new JComboBox<>(new String[] {"Custom directory", "Launcher profile"});
         comboBox.setPrototypeDisplayValue("Custom directory");
 
-        WrapperInstaller.applyComponentTheme(comboBox, WrapperInstaller.Theme.LIGHT);
+        WrapperInstaller.applyComponentTheme(comboBox);
 
         assertTrue(comboBox.getPreferredSize().width > 100);
         JList<String> list = new JList<>();
@@ -252,7 +400,7 @@ class WrapperInstallerTest {
     @Test
     void leavesCurrentComboValueRendererTransparentForFullWidthBackground() {
         JComboBox<String> comboBox = new JComboBox<>(new String[] {"Client", "Server"});
-        WrapperInstaller.applyComponentTheme(comboBox, WrapperInstaller.Theme.LIGHT);
+        WrapperInstaller.applyComponentTheme(comboBox);
 
         Component currentValue = comboBox.getRenderer().getListCellRendererComponent(
                 new JList<>(), "Server", -1, false, false);
@@ -263,7 +411,7 @@ class WrapperInstallerTest {
     @Test
     void fillsEntireFocusedComboValueWithSelectionColor() {
         JComboBox<String> comboBox = new JComboBox<>(new String[] {"Client", "Server"});
-        WrapperInstaller.applyComponentTheme(comboBox, WrapperInstaller.Theme.LIGHT);
+        WrapperInstaller.applyComponentTheme(comboBox);
         BasicComboBoxUI comboBoxUI = (BasicComboBoxUI) comboBox.getUI();
         comboBox.setSize(160, 24);
         BufferedImage image = new BufferedImage(160, 24, BufferedImage.TYPE_INT_RGB);

@@ -21,19 +21,21 @@ import java.awt.event.MouseAdapter;
 import javax.swing.text.JTextComponent;
 import javax.swing.plaf.basic.BasicComboBoxUI;
 import javax.swing.border.LineBorder;
+import java.util.zip.GZIPInputStream;
 import net.minecraftforge.installer.automodpack.Installation;
 
 public final class WrapperInstaller {
     private static final Logger LOGGER = Logger.getLogger(WrapperInstaller.class.getName());
     private static final int HOVER_ANIMATION_DURATION = 180;
     private static final int HOVER_ANIMATION_INTERVAL = 15;
+    private static final Theme DEFAULT_THEME = Theme.DARK;
 
     enum Theme {
         LIGHT, DARK
     }
 
     enum LauncherApp {
-        CURSEFORGE("CurseForge", "https://www.curseforge.com/download/app?clientType=standalone"),
+        CURSEFORGE("CurseForge", "https://download.overwolf.com/install/Download?Name=CurseForge&ExtensionId=cfiahnpaolfnlgaihhmobmnjdafknjnjdpdabpcm"),
         MODRINTH("Modrinth", "https://api.github.com/repos/modrinth/theseus/releases/latest");
 
         private final String displayName;
@@ -120,17 +122,10 @@ public final class WrapperInstaller {
     }
 
     private static int runInstallation(File installer, String action, String neoForgeVersion, File target, Consumer<String> output) throws java.io.IOException, InterruptedException {
-        return runInstallation(installer, action, neoForgeVersion, target, null, output);
-    }
-
-    private static int runInstallation(File installer, String action, String neoForgeVersion, File target,
-            Path javaExecutable, Consumer<String> output) throws java.io.IOException, InterruptedException {
         String safeAction = validateAction(action);
         String safeVersion = validateVersion(neoForgeVersion);
         File safeTarget = validateTarget(target.getPath());
-        int exitCode = javaExecutable == null
-                ? OfficialInstallerLauncher.run(installer, safeAction, safeTarget, output)
-                : OfficialInstallerLauncher.run(installer, safeAction, safeTarget, javaExecutable, output);
+        int exitCode = OfficialInstallerLauncher.run(installer, safeAction, safeTarget, output);
         if (exitCode == 0 && installsGame(safeAction)) {
             output.accept("NeoForge installation finished. Installing AutoModpack...\n");
             Installation.installAutomodpackOrThrow(minecraftVersion(safeVersion), "neoforge",
@@ -195,12 +190,12 @@ public final class WrapperInstaller {
 	}
 
 	private void createAndShowGUI() {
-		applyThemeDefaults(Theme.LIGHT);
+		applyThemeDefaults(DEFAULT_THEME);
 		JFrame frame = new JFrame("Installer");
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		frame.setContentPane(createInstallerPanel(frame));
 		frame.setJMenuBar(createMenuBar(frame));
-		applyComponentThemeRecursively(frame, Theme.LIGHT);
+		applyComponentThemeRecursively(frame, DEFAULT_THEME);
 		frame.pack();
 		frame.setMinimumSize(new Dimension(640, 460));
 		frame.setLocationRelativeTo(null);
@@ -225,8 +220,8 @@ public final class WrapperInstaller {
 		JMenu appearanceMenu = new JMenu("Appearance");
 		appearanceMenu.setHorizontalAlignment(SwingConstants.LEFT);
 		ButtonGroup themes = new ButtonGroup();
-		addThemeItem(appearanceMenu, themes, "Light", Theme.LIGHT, frame, true);
-		addThemeItem(appearanceMenu, themes, "Dark", Theme.DARK, frame, false);
+		addThemeItem(appearanceMenu, themes, "Light", Theme.LIGHT, frame, DEFAULT_THEME == Theme.LIGHT);
+		addThemeItem(appearanceMenu, themes, "Dark", Theme.DARK, frame, DEFAULT_THEME == Theme.DARK);
 		settingsMenu.add(appearanceMenu);
 
 		JMenu helpMenu = new JMenu("Help");
@@ -261,6 +256,10 @@ public final class WrapperInstaller {
 			case LIGHT -> "Light";
 			case DARK -> "Dark";
 		};
+	}
+
+	static Theme defaultTheme() {
+		return DEFAULT_THEME;
 	}
 
 	static String launcherAppUrl(LauncherApp app) {
@@ -307,30 +306,95 @@ public final class WrapperInstaller {
 	static Path downloadLauncherInstaller(LauncherApp app, Consumer<String> output) throws IOException {
 		String downloadUrl = app == LauncherApp.MODRINTH
 				? resolveModrinthDownloadUrl() : app.downloadUrl();
-		URL url = new URL(downloadUrl);
+		return downloadLauncherInstaller(app, new URL(downloadUrl), output);
+	}
+
+	static Path downloadLauncherInstaller(LauncherApp app, URL url, Consumer<String> output) throws IOException {
 		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-		connection.setRequestProperty("User-Agent", "AutoModpack-Installer");
-		connection.setInstanceFollowRedirects(true);
-		if (connection.getResponseCode() < 200 || connection.getResponseCode() >= 300) {
-			throw new IOException("Installer download returned HTTP " + connection.getResponseCode());
-		}
-		String contentType = connection.getContentType();
-		if (contentType != null && contentType.toLowerCase(Locale.ROOT).startsWith("text/html")) {
-			throw new IOException("The official launcher endpoint returned a webpage instead of an installer");
-		}
-		String suffix = installerSuffix(connection.getContentType(), downloadUrl);
-		Path target = Files.createTempFile("automodpack-" + app.displayName().toLowerCase(Locale.ROOT) + "-", suffix);
-		try (InputStream input = connection.getInputStream()) {
-			Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
+		Path target = null;
+		try {
+			configureLauncherDownloadConnection(connection, app);
+			connection.setInstanceFollowRedirects(true);
+			int responseCode = connection.getResponseCode();
+			if (responseCode < 200 || responseCode >= 300) {
+				throw new IOException("Installer download returned HTTP " + responseCode);
+			}
+			String contentType = connection.getContentType();
+			if (contentType != null && contentType.toLowerCase(Locale.ROOT).startsWith("text/html")) {
+				throw new IOException("The official launcher endpoint returned a webpage instead of an installer");
+			}
+			String suffix = installerSuffix(contentType, url.toExternalForm());
+			target = Files.createTempFile("automodpack-" + app.displayName().toLowerCase(Locale.ROOT) + "-", suffix);
+			try (InputStream input = decodedResponseStream(connection)) {
+				Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
+			}
+			if (Files.size(target) == 0) {
+				throw new IOException("The downloaded installer was empty");
+			}
+			if (app == LauncherApp.CURSEFORGE && !isWindowsExecutable(target)) {
+				throw new IOException("The CurseForge download was not a valid Windows executable");
+			}
+			output.accept("Downloaded installer to " + target);
+			return target;
+		} catch (IOException | RuntimeException exception) {
+			if (target != null) {
+				try {
+					Files.deleteIfExists(target);
+				} catch (IOException cleanupException) {
+					exception.addSuppressed(cleanupException);
+				}
+			}
+			throw exception;
 		} finally {
 			connection.disconnect();
 		}
-		if (Files.size(target) == 0) {
-			Files.deleteIfExists(target);
-			throw new IOException("The downloaded installer was empty");
+	}
+
+	private static InputStream decodedResponseStream(HttpURLConnection connection) throws IOException {
+		InputStream input = connection.getInputStream();
+		String contentEncoding = connection.getContentEncoding();
+		if (contentEncoding == null || contentEncoding.isBlank()
+				|| "identity".equalsIgnoreCase(contentEncoding.trim())) {
+			return input;
 		}
-		output.accept("Downloaded installer to " + target);
-		return target;
+		if ("gzip".equalsIgnoreCase(contentEncoding.trim())) {
+			try {
+				return new GZIPInputStream(input);
+			} catch (IOException exception) {
+				try {
+					input.close();
+				} catch (IOException closeException) {
+					exception.addSuppressed(closeException);
+				}
+				throw new IOException("The download declared gzip encoding but contained invalid gzip data", exception);
+			}
+		}
+		IOException exception = new IOException("Unsupported HTTP content encoding: " + contentEncoding);
+		try {
+			input.close();
+		} catch (IOException closeException) {
+			exception.addSuppressed(closeException);
+		}
+		throw exception;
+	}
+
+	static void configureLauncherDownloadConnection(HttpURLConnection connection, LauncherApp app) {
+		connection.setRequestProperty("User-Agent",
+				"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+						+ "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+		connection.setRequestProperty("Accept", app == LauncherApp.CURSEFORGE
+				? "application/octet-stream,application/x-msdownload,application/vnd.microsoft.portable-executable;q=0.9,*/*;q=0.8"
+				: "application/octet-stream,application/json;q=0.9,*/*;q=0.8");
+		connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
+		connection.setRequestProperty("Accept-Encoding", "identity");
+		if (app == LauncherApp.CURSEFORGE) {
+			connection.setRequestProperty("Referer", "https://www.curseforge.com/");
+			connection.setRequestProperty("Sec-Fetch-Dest", "document");
+			connection.setRequestProperty("Sec-Fetch-Mode", "navigate");
+			connection.setRequestProperty("Sec-Fetch-Site", "same-origin");
+			connection.setRequestProperty("Sec-Fetch-User", "?1");
+			connection.setRequestProperty("Upgrade-Insecure-Requests", "1");
+		}
 	}
 
 	private static String resolveModrinthDownloadUrl() throws IOException {
@@ -342,9 +406,16 @@ public final class WrapperInstaller {
 		}
 		try (InputStream input = connection.getInputStream()) {
 			String json = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-			String preferred = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")
-					? "\\.exe" : System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac") ? "\\.dmg" : "\\.AppImage";
-			java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\\"browser_download_url\\\"\\s*:\\s*\\\"([^\\\"]+" + preferred + ")\\\"").matcher(json);
+			String operatingSystem = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+			String preferred;
+			if (operatingSystem.contains("win")) {
+				preferred = "\\.exe";
+			} else if (operatingSystem.contains("mac")) {
+				preferred = "\\.dmg";
+			} else {
+				preferred = "\\.AppImage";
+			}
+			java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"browser_download_url\"\\s*:\\s*\"([^\"]+" + preferred + ")\"").matcher(json);
 			if (matcher.find()) {
 				return matcher.group(1).replace("\\u0026", "&");
 			}
@@ -361,6 +432,22 @@ public final class WrapperInstaller {
 		if (lower.contains(".deb")) return ".deb";
 		if (lower.contains(".rpm")) return ".rpm";
 		return contentType != null && contentType.toLowerCase(Locale.ROOT).contains("zip") ? ".zip" : ".exe";
+	}
+
+	static boolean isWindowsExecutable(Path file) throws IOException {
+		try (java.io.RandomAccessFile input = new java.io.RandomAccessFile(file.toFile(), "r")) {
+			if (input.length() < 64 || input.readUnsignedByte() != 'M' || input.readUnsignedByte() != 'Z') {
+				return false;
+			}
+			input.seek(60);
+			long peOffset = Integer.toUnsignedLong(Integer.reverseBytes(input.readInt()));
+			if (peOffset > input.length() - 4) {
+				return false;
+			}
+			input.seek(peOffset);
+			return input.readUnsignedByte() == 'P' && input.readUnsignedByte() == 'E'
+					&& input.readUnsignedByte() == 0 && input.readUnsignedByte() == 0;
+		}
 	}
 
 	private static void launchInstaller(Path installer) throws IOException {
@@ -385,9 +472,9 @@ public final class WrapperInstaller {
 		}
 	}
 
-	static void applyComponentTheme(Component component, Theme theme) {
-		applyThemeDefaults(theme);
-		applyComponentThemeRecursively(component, theme);
+	static void applyComponentTheme(Component component) {
+		applyThemeDefaults(Theme.LIGHT);
+		applyComponentThemeRecursively(component, Theme.LIGHT);
 	}
 
 	private static void applyComponentThemeRecursively(Component component, Theme theme) {
@@ -699,8 +786,13 @@ public final class WrapperInstaller {
 			Color selectionBackground = UIManager.getColor("ComboBox.selectionBackground");
 			boolean hovered = Boolean.TRUE.equals(comboBox.getClientProperty("WrapperInstaller.comboHovered"));
 			Color hoverColor = (Color) comboBox.getClientProperty("WrapperInstaller.comboHoverColor");
-			Color background = hasFocus && selectionBackground != null ? selectionBackground
-					: hovered && hoverColor != null ? hoverColor : comboBox.getBackground();
+			Color background = comboBox.getBackground();
+			if (hovered && hoverColor != null) {
+				background = hoverColor;
+			}
+			if (hasFocus && selectionBackground != null) {
+				background = selectionBackground;
+			}
 			graphics.setColor(background);
 			int width = Math.max(bounds.width, comboBox.getWidth());
 			int height = Math.max(bounds.height, comboBox.getHeight());
@@ -1124,7 +1216,7 @@ public final class WrapperInstaller {
 				publish("Downloaded official installer: " + installerJar + "\nStarting installation...\n");
 				File destination = selectedAction.equals("--fat-installer")
 						? new File(target, "neoforge-" + version + "-fat.jar") : target;
-    return runInstallation(installerJar, selectedAction, version, destination, null,
+    return runInstallation(installerJar, selectedAction, version, destination,
 						line -> publish(line + "\n"));
 			}
 
